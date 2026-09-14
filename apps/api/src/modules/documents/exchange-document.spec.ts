@@ -31,7 +31,7 @@ const prismaStub = {
   tenantSettings: { findMany: jest.fn(async () => []) },
 } as any;
 const pdfStub = { available: true, htmlToPdf: jest.fn(async () => null) } as any;
-// D154 — only the PREVIEW path reads the profile; a real exchange document is
+// D165 — only the PREVIEW path reads the profile; a real exchange document is
 // built from the exchange itself, so this stub exists to satisfy the
 // constructor and is deliberately never expected to be consulted here.
 const profilesStub = {
@@ -39,7 +39,7 @@ const profilesStub = {
 } as any;
 
 /*
- * D172 — branding images are inlined at render time, so the service now takes
+ * D193 — branding images are inlined at render time, so the service now takes
  * a StorageService. This stub resolves NOTHING, which is the honest default for
  * these specs: they assert layout and wording, and a tenant with no logo
  * uploaded is exactly the state they were written against. `inline-image.spec`

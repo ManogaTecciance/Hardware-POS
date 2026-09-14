@@ -123,7 +123,7 @@ export default function PaymentPage() {
   const [creditUnavailable, setCreditUnavailable] = React.useState(false);
   const [printAfter, setPrintAfter] = React.useState(true);
   /*
-   * D152 — does this workspace have an A4 bill at all?
+   * D163 — does this workspace have an A4 bill at all?
    *
    * A retail workspace's sale document is the thermal slip now, and this
    * screen was opening an A4 print window on EVERY completed sale — the
@@ -143,9 +143,9 @@ export default function PaymentPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [completed, setCompleted] = React.useState<CompletedSale | null>(null);
   /*
-   * D163 — the tender, SNAPSHOT at completion.
+   * D184 — the tender, SNAPSHOT at completion.
    *
-   * D162 read `tendered` again at print time and always found it empty.
+   * D183 read `tendered` again at print time and always found it empty.
    * Completing the sale clears the cart, `total` changes, and the effect
    * that seeds this field with the exact amount fires and overwrites what
    * the operator typed — before they ever reach the Thermal receipt
@@ -389,7 +389,7 @@ export default function PaymentPage() {
       };
       setReceiptCtx(ctx);
       setCompleted(sale);
-      // D163 — BEFORE `clearCart`, which resets `tendered` through the
+      // D184 — BEFORE `clearCart`, which resets `tendered` through the
       // `total` effect. Only a cash over-tender is worth keeping; every
       // other shape prints nothing anyway.
       const tender = mode === 'CASH' && tenderedNum > total ? tenderedNum : null;
@@ -407,9 +407,9 @@ export default function PaymentPage() {
        */
       if (printAfter) {
         /*
-         * D166 — print the bill this workspace actually issues.
+         * D187 — print the bill this workspace actually issues.
          *
-         * D152 took the A4 away from retail and this line kept its `&&
+         * D163 took the A4 away from retail and this line kept its `&&
          * canPrintA4` guard, so a retail till completed a sale and printed
          * NOTHING — the cashier had to find a text link. The guard now
          * chooses instead of refusing.
@@ -417,7 +417,7 @@ export default function PaymentPage() {
          * Safe after the await: D78 prints receipts from a hidden iframe,
          * not a popup, so there is no transient-activation window to miss.
          * Local `sale`, `ctx` and `tender` are used rather than the state
-         * just set — React has not re-rendered yet, and D163 is the bug
+         * just set — React has not re-rendered yet, and D184 is the bug
          * that comes from reading state a beat too early.
          */
         if (canPrintA4) openA4Bill(sale.id, true);
@@ -451,7 +451,7 @@ export default function PaymentPage() {
   const printReceipt = async () => {
     if (!completed || !receiptCtx) return;
     /*
-     * D162/D163 — the tender travels to the receipt, and nowhere else.
+     * D183/D184 — the tender travels to the receipt, and nowhere else.
      *
      * The screen has shown "Change" since D74 and the paper never did,
      * because `tendered` was local state used for that display and then
@@ -876,9 +876,9 @@ export default function PaymentPage() {
             ) : null}
 
             <div className="flex flex-wrap items-center justify-between gap-3">
-              {/* D152 — the A4 went away for retail.
-                  D166 — the TOGGLE comes back, naming whichever bill this
-                  workspace prints. D152 hid it because there was no A4 to
+              {/* D163 — the A4 went away for retail.
+                  D187 — the TOGGLE comes back, naming whichever bill this
+                  workspace prints. D163 hid it because there was no A4 to
                   print; there is still a receipt, and now that it prints
                   automatically the operator needs the switch that turns it
                   off. */}
@@ -1141,7 +1141,7 @@ function Row({
 /**
  * The payment-complete dialog.
  *
- * Exported for its spec (D166): which bill this offers is a per-workspace
+ * Exported for its spec (D187): which bill this offers is a per-workspace
  * decision, and the defect it fixes was invisible to every other test
  * because nothing rendered this page.
  */

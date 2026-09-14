@@ -1,5 +1,5 @@
 /**
- * D171 — two tenants may both print a receipt for their own sale S-000001.
+ * D192 — two tenants may both print a receipt for their own sale S-000001.
  *
  * ## The defect this closes
  *
@@ -109,7 +109,7 @@ beforeEach(async () => {
   second = await seedSecondTenant(prisma);
 });
 
-describe('D171 — a receipt number is unique per tenant, not globally', () => {
+describe('D192 — a receipt number is unique per tenant, not globally', () => {
   it('both tenants print their own S-000001, and the numbers are identical', async () => {
     const saleA = await sellOnce(first);
     const saleB = await sellOnce(second);
@@ -120,7 +120,7 @@ describe('D171 — a receipt number is unique per tenant, not globally', () => {
     expect(saleB.saleNumber).toBe('S-000001');
 
     const printedA = await receipts.generateCustomer(first.tenantId, saleA.id, first.ownerId);
-    // Before D171 the next line threw P2002 and the till saw a 500.
+    // Before D192 the next line threw P2002 and the till saw a 500.
     const printedB = await receipts.generateCustomer(second.tenantId, saleB.id, second.ownerId);
 
     expect(printedA.receiptNumber).toBe('RCP-S-000001');
@@ -181,7 +181,7 @@ describe('D171 — a receipt number is unique per tenant, not globally', () => {
 
     // A second sale in the SAME tenant, forced to reuse the first receipt's
     // number. Nothing in the application does this; the point is that the
-    // database still refuses it, so D171 loosened the constraint rather than
+    // database still refuses it, so D192 loosened the constraint rather than
     // removing it.
     const saleA2 = await sellOnce(first);
     await expect(

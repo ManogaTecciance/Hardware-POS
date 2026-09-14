@@ -1,7 +1,7 @@
 import { renderCustomerReceipt, type CustomerReceiptData } from './receipt-templates';
 
 /**
- * D162 — the receipt says what crossed the counter and what went back.
+ * D183 — the receipt says what crossed the counter and what went back.
  *
  * ## What was reported
  *
@@ -79,10 +79,10 @@ function text(html: string): string {
     .trim();
 }
 
-describe('D162 — cash received and change on the customer receipt', () => {
+describe('D183 — cash received and change on the customer receipt', () => {
   it('prints four rows, and none of them twice', () => {
     /*
-     * D164 — the reported clutter, stated as an assertion. This used to
+     * D185 — the reported clutter, stated as an assertion. This used to
      * print seven rows with the total repeated three times (Total, Paid and
      * a trailing Cash payment row), burying the two figures the customer
      * came for.
@@ -99,7 +99,7 @@ describe('D162 — cash received and change on the customer receipt', () => {
     // NEGATIVE — the two rows that said nothing are gone: the old `Paid`
     // row (the total again) and the payment breakdown (the total a third
     // time). Asserted as a COUNT rather than an absent label, because
-    // since D167 both layouts share the same three labels — what
+    // since D188 both layouts share the same three labels — what
     // distinguishes them is how many times the figure appears.
     expect(out.match(/Rs\. 2,478\.00/g) ?? []).toHaveLength(1);
     expect(out).not.toContain('Bal. Amount Rs. 0.00');
@@ -119,7 +119,7 @@ describe('D162 — cash received and change on the customer receipt', () => {
     expect(out).toContain('Paid Amount Rs. 2,478.00');
     expect(out).toContain('Bal. Amount Rs. 0.00');
     /*
-     * The discriminator, since D167 gave both layouts the same labels: the
+     * The discriminator, since D188 gave both layouts the same labels: the
      * ordinary layout keeps the payment BREAKDOWN, and the short one drops
      * it. Without this the case would pass against a receipt that had taken
      * the short path and printed `Bal. Amount Rs. 0.00` — the row this
@@ -139,7 +139,7 @@ describe('D162 — cash received and change on the customer receipt', () => {
       ),
     );
 
-    // The tender never becomes a row of its own. Since D167 it would
+    // The tender never becomes a row of its own. Since D188 it would
     // wear the SAME label as the real figure, so this is a count: one
     // `Paid Amount` row, not two.
     expect(out.match(/Paid Amount/g) ?? []).toHaveLength(1);
@@ -152,7 +152,7 @@ describe('D162 — cash received and change on the customer receipt', () => {
     /*
      * The isolation case, and the one that matters most for blast radius: a
      * REPRINT, a card sale, a credit sale and every restaurant bill reach this
-     * renderer with no tender, and must print exactly as they did before D162.
+     * renderer with no tender, and must print exactly as they did before D183.
      */
     const out = text(renderCustomerReceipt(makeReceipt()));
 
@@ -165,7 +165,7 @@ describe('D162 — cash received and change on the customer receipt', () => {
     expect(out).toContain('Paid Amount Rs. 2,478.00');
     expect(out).toContain('Bal. Amount Rs. 0.00');
     // The breakdown survives untouched — this is the reprint/card/restaurant
-    // shape, and it must print exactly what it printed before D162.
+    // shape, and it must print exactly what it printed before D183.
     expect(out).toContain('Cash Rs. 2,478.00');
   });
 
@@ -195,10 +195,10 @@ describe('D162 — cash received and change on the customer receipt', () => {
   });
 });
 
-describe('D164 — the settlement block keeps what a split tender needs', () => {
+describe('D185 — the settlement block keeps what a split tender needs', () => {
   it('suppresses the payment row that merely repeats the total', () => {
     // One cash payment for the whole total is the row that said 2,478 a
-    // third time. `Cash` here is the METHOD name, which D167 left alone —
+    // third time. `Cash` here is the METHOD name, which D188 left alone —
     // so its absence is exactly the suppression being asserted.
     const out = text(renderCustomerReceipt(makeReceipt({ amountTendered: 5000 })));
 
@@ -242,7 +242,7 @@ describe('D164 — the settlement block keeps what a split tender needs', () => 
     /*
      * The isolation case. A card sale, a restaurant bill and every reprint
      * arrive with no tender and must print exactly what they printed before
-     * D162 — Paid, Balance and the full breakdown.
+     * D183 — Paid, Balance and the full breakdown.
      */
     const out = text(renderCustomerReceipt(makeReceipt()));
 

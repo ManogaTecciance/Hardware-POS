@@ -300,7 +300,7 @@ export function openPrintWindow(html: string): void {
 /**
  * Print the customer receipt: server-rendered, with a client-side fallback.
  *
- * D162 — `amountTendered` is what the operator actually took, and it is
+ * D183 — `amountTendered` is what the operator actually took, and it is
  * sent only from the till, where it was observed. The server prints
  * "Cash received" and "Change" from it and ignores it unless it exceeds the
  * total; it changes no stored money. `reprintCustomerReceipt` below sends

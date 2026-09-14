@@ -410,7 +410,7 @@ export function PosRetailCheckout() {
    *     till asking.
    */
   /*
-   * D160 — every BUY_X_GET_Y this basket has not finished, as ONE list.
+   * D171 — every BUY_X_GET_Y this basket has not finished, as ONE list.
    *
    * ## The cashier adds the reward; the till only requires it (D45, 4.14)
    *
@@ -419,13 +419,13 @@ export function PosRetailCheckout() {
    * the entitlement moved, and an effect that fought its own state. The
    * till states what is owed and refuses payment until it is in the basket,
    * which leaves the choice of product, variant, colour and size with the
-   * person serving the customer. D160 widens what counts as owed; it does
+   * person serving the customer. D171 widens what counts as owed; it does
    * not revisit that.
    *
-   * ## What D160 changed
+   * ## What D171 changed
    *
    * D45 (4.14) blocked payment for a cross-product reward the customer had
-   * earned and was not holding. D155 added a same-product prompt beside it
+   * earned and was not holding. D166 added a same-product prompt beside it
    * that deliberately did NOT block, on the reasoning that five ties at full
    * price is a real sale and refusing it is hostile.
    *
@@ -677,11 +677,11 @@ export function PosRetailCheckout() {
         ) : null}
       </div>
 
-      {/* D45 (4.14) / D160 — what the customer is owed, and how many are
+      {/* D45 (4.14) / D171 — what the customer is owed, and how many are
           still to come. Named per promotion, because two offers can be
           outstanding at once.
 
-          D160 — ONE block for both shapes. A same-product "buy 5 get 1"
+          D171 — ONE block for both shapes. A same-product "buy 5 get 1"
           used to render a second, muted, non-blocking notice below this
           one; the cashier now reads the same sentence and the same gift
           whichever kind of offer is short, because a till that presents

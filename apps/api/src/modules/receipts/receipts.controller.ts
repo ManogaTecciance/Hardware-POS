@@ -21,7 +21,7 @@ export class ReceiptsController {
   /**
    * Generate the customer receipt.
    *
-   * D162 — the body is OPTIONAL and usually absent. The till sends
+   * D183 — the body is OPTIONAL and usually absent. The till sends
    * `amountTendered` so the paper can say what was handed over and what
    * went back; the reprint path sends nothing, because the tender is not
    * stored and a reprint cannot honestly claim one.

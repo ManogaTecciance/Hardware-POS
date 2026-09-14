@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * D128 / D128a / D173 — swap what did not fit.
+ * D128 / D128a / D194 — swap what did not fit.
  *
  * ## What this screen is
  *
@@ -10,7 +10,7 @@
  * back; the replacement leg is sold in full.
  *
  * `7.5` shipped the thinnest visible path — ONE returned line, one replacement
- * — and said so: "multi-line exchanges … out of scope by agreement". D173
+ * — and said so: "multi-line exchanges … out of scope by agreement". D194
  * closed that, because the agreement did not survive contact with a shop. A
  * customer who bought three things and wants two swapped had to be served as
  * two separate exchanges, which produces two exchange numbers, two returns and
@@ -36,7 +36,7 @@
  * over their refund limit, a sale outside the return period, damaged goods, a
  * credit customer, a mismatched refund method.
  *
- * D173 makes that more than a detail: approval is evaluated on the WHOLE
+ * D194 makes that more than a detail: approval is evaluated on the WHOLE
  * basket, once, the way the completion will evaluate it. Two separate exchanges
  * could each pass a per-exchange refund limit that the combined basket exceeds.
  *

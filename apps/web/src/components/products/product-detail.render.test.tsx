@@ -103,9 +103,9 @@ const branches: BranchSummary[] = [
 ];
 
 /**
- * D158 — a catalogue that ANSWERED and is empty, which is not the same as one
+ * D169 — a catalogue that ANSWERED and is empty, which is not the same as one
  * that has not answered. The fixtures above carry no `categoryId` and no
- * `brandId`, so these are never actually consulted; the D158 cases below pass
+ * `brandId`, so these are never actually consulted; the D169 cases below pass
  * their own. Naming it here keeps that distinction visible rather than letting
  * `{state:'ready', rows:[]}` read as "no catalogue" at thirteen call sites.
  */
@@ -630,7 +630,7 @@ describe('ProductDetail — Inventory/Purchases tabs (D101/D103)', () => {
 });
 
 /**
- * D156 — the overview must not assert a shape it has not been told.
+ * D167 — the overview must not assert a shape it has not been told.
  *
  * ## The defect
  *
@@ -650,7 +650,7 @@ describe('ProductDetail — Inventory/Purchases tabs (D101/D103)', () => {
  * Each case also pins what must NOT appear: the wrong claim is the defect, and
  * "loading" quietly replacing every KPI would be its own regression.
  */
-describe('D156 — the Variants KPI while the list is still loading', () => {
+describe('D167 — the Variants KPI while the list is still loading', () => {
   const mount = (variantsState: 'loading' | 'ready' | 'error', variants = [makeVariant()]) =>
     render(
       <ProductDetail
@@ -779,7 +779,7 @@ describe('D156 — the Variants KPI while the list is still loading', () => {
 });
 
 /**
- * D158 — the Overview shows what the product IS, not only what it costs.
+ * D169 — the Overview shows what the product IS, not only what it costs.
  *
  * ## What was reported
  *
@@ -793,7 +793,7 @@ describe('D156 — the Variants KPI while the list is still loading', () => {
  *
  * Two traps, and a case for each.
  *
- * The first is the D156 trap one card over: a name that has not arrived yet
+ * The first is the D167 trap one card over: a name that has not arrived yet
  * must not render as `—`, because `—` is what a product with NO category
  * shows. Both are asserted against products that differ only in whether the id
  * is set, so an implementation that treated "waiting" and "absent" alike fails
@@ -806,7 +806,7 @@ describe('D156 — the Variants KPI while the list is still loading', () => {
  * absence case therefore also asserts a heading that MUST still be present, so
  * it cannot pass because the Overview rendered nothing.
  */
-describe('D158 — Category and Brand', () => {
+describe('D169 — Category and Brand', () => {
   const mount = (
     product: ManagedProduct,
     over: {
@@ -860,7 +860,7 @@ describe('D158 — Category and Brand', () => {
     await waitFor(() => expect(screen.getByText('Category')).toBeTruthy());
     const row = screen.getByText('Category').parentElement;
     expect(row?.textContent).toContain('Loading');
-    // The D156 trap, stated as an assertion: `—` here would be
+    // The D167 trap, stated as an assertion: `—` here would be
     // indistinguishable from the uncategorised product in the next case.
     expect(row?.textContent).not.toContain('—');
   });
@@ -899,7 +899,7 @@ describe('D158 — Category and Brand', () => {
   });
 });
 
-describe('D158 — Business details', () => {
+describe('D169 — Business details', () => {
   const mount = (product: ManagedProduct, fields: AttributeField[]) =>
     render(
       <ProductDetail
@@ -958,7 +958,7 @@ describe('D158 — Business details', () => {
   });
 });
 
-describe('D158 — Variations', () => {
+describe('D169 — Variations', () => {
   const dimensions: ProductVariationDimension[] = [
     {
       id: 'dim_1',
@@ -1019,7 +1019,7 @@ describe('D158 — Variations', () => {
 
   it('says so when the dimensions could not be loaded', async () => {
     /*
-     * D156 left this fetch's failure flattened to `[]` and said why: nothing
+     * D167 left this fetch's failure flattened to `[]` and said why: nothing
      * displayed it. It does now, so an empty list from a failed request would
      * read as "this product varies on nothing" — for a product whose own
      * payload says it has variants.

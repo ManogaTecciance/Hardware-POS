@@ -53,7 +53,7 @@ const RESTAURANT_BRANCH_ID = 'brn_resto';
 const RESTAURANT_REGISTER_ID = 'reg_resto';
 
 /*
- * D169/D170 — the two RETAIL workspaces.
+ * D190/D191 — the two RETAIL workspaces.
  *
  * The seed grew a hardware tenant, a restaurant tenant and a platform console,
  * and never a retail one — so every retail workspace on the team was
@@ -61,7 +61,7 @@ const RESTAURANT_REGISTER_ID = 'reg_resto';
  * else, because the tenant does not exist in their database: sharing a password
  * cannot share a row.
  *
- * D170 made it TWO. `RETAIL` covers both trades and they exercise opposite
+ * D191 made it TWO. `RETAIL` covers both trades and they exercise opposite
  * halves of the catalogue: clothing sells a variant chain (Size x Colour, a
  * barcode and a stock row each), grocery sells by weight (`DECIMAL` quantity,
  * `kg` and `L`). One demo tenant could only ever show one of them, and a
@@ -266,7 +266,7 @@ async function main(): Promise<void> {
   // exercises DATABASE resolution rather than the legacy fallback. Safe because
   // parity is proven — the rows grant exactly what the enum granted.
   /*
-   * D169 — retail needs no explicit role wiring, unlike the waiter and the
+   * D190 — retail needs no explicit role wiring, unlike the waiter and the
    * kitchen below. Its templates are Owner and Cashier, whose keys match
    * their `UserRole` values, so `linkUsersToRoles` matches them by name.
    */
@@ -388,7 +388,7 @@ async function main(): Promise<void> {
 }
 
 /**
- * D170 — what distinguishes one retail workspace from another.
+ * D191 — what distinguishes one retail workspace from another.
  *
  * Everything a clothing shop and a grocery need from the seed is the same
  * except these fields and the catalogue. Writing the seeder twice would mean
@@ -459,7 +459,7 @@ const GROCERY_SHOP: RetailShop = {
 };
 
 /**
- * D170 — one retail workspace, carrying a catalogue exported from the real shop.
+ * D191 — one retail workspace, carrying a catalogue exported from the real shop.
  *
  * ## Why this can return `null`
  *
@@ -469,7 +469,7 @@ const GROCERY_SHOP: RetailShop = {
  * machine whose database matters most.
  *
  * The alternatives were worse. Renaming their tenant to claim the slug takes
- * their work hostage to a convention, which D169 already refused. Adopting the
+ * their work hostage to a convention, which D190 already refused. Adopting the
  * row and writing into it makes the seed overwrite a workspace someone is
  * actively using. So the seed **stands aside**: it says plainly that the slug is
  * spoken for, and seeds nothing.
@@ -535,7 +535,7 @@ async function seedRetailShop(passwordHash: string, shop: RetailShop) {
    * Guarded by a lookup rather than upserted: `(tenantId, branchId)` carries no
    * unique index, so a re-seed would otherwise stack a second row.
    *
-   * No business detail DEFINITIONS are written. D150 makes them a tenant
+   * No business detail DEFINITIONS are written. D161 makes them a tenant
    * override and `schemaFor` falls back to RETAIL's shipped fields when there is
    * none, so restating Material / Fit / Care instructions / Gender / Season here
    * would freeze today's list into this tenant and stop it tracking the domain.

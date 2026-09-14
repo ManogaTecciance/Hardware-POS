@@ -37,7 +37,7 @@ export class ReceiptsService {
   constructor(
     private readonly receiptsRepository: ReceiptsRepository,
     private readonly settingsService: SettingsService,
-    /** D172 — reads the logo's bytes so the printed bill carries them. */
+    /** D193 — reads the logo's bytes so the printed bill carries them. */
     private readonly storage: StorageService,
   ) {}
 
@@ -46,7 +46,7 @@ export class ReceiptsService {
   /**
    * Generate the customer receipt for a completed sale.
    *
-   * D162 — `amountTendered` is passed through to the renderer and
+   * D183 — `amountTendered` is passed through to the renderer and
    * nowhere else. It does not touch `paidAmount`, `balanceAmount` or the
    * `Payment` row: the sale really was settled for its total, and the
    * difference was handed straight back over the counter.
@@ -61,7 +61,7 @@ export class ReceiptsService {
     const settings = this.settingsService.getSettings(tenantId);
 
     /*
-     * D165 — a reprint keeps the tender the first print recorded.
+     * D186 — a reprint keeps the tender the first print recorded.
      *
      * The till sends `amountTendered` once, at the counter. `Receipt.content`
      * is a JSON column and the receipt data is spread into it, so that first
@@ -80,7 +80,7 @@ export class ReceiptsService {
     const tender = amountTendered ?? (await this.storedTender(tenantId, saleId));
 
     /*
-     * D172 — the shop's logo, inlined.
+     * D193 — the shop's logo, inlined.
      *
      * The SAME `documents.logoUrl` the A4 letterhead uses, not a second
      * setting: a shop has one logo, and asking an operator to upload it twice
@@ -193,7 +193,7 @@ export class ReceiptsService {
   }
 
   /**
-   * D165 — the tender a previous print recorded, or undefined.
+   * D186 — the tender a previous print recorded, or undefined.
    *
    * Read defensively: `content` is JSON written by this service, but it is
    * still a column anything could have put a shape into, and a receipt that
@@ -215,7 +215,7 @@ export class ReceiptsService {
     logoDataUri?: string | null,
   ): CustomerReceiptData {
     return {
-      // D162 — spread into the stored `Receipt.content` too (it is a JSON
+      // D183 — spread into the stored `Receipt.content` too (it is a JSON
       // column, so no migration), which means the ORIGINAL receipt keeps a
       // record of the tender. A reprint re-renders without it, exactly as
       // it does today.

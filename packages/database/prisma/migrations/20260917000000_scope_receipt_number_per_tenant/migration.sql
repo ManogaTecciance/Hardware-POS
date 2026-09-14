@@ -1,4 +1,4 @@
--- D171 — `Receipt.receiptNumber` is unique per TENANT, not globally.
+-- D192 — `Receipt.receiptNumber` is unique per TENANT, not globally.
 --
 -- `receiptNumber` is built as `RCP-<sale.saleNumber>`, and `Sale` is
 -- `@@unique([tenantId, saleNumber])` — every tenant's numbering restarts at

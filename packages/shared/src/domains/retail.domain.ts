@@ -47,12 +47,12 @@ import { RETAIL_MODULES, SHARED_CORE_MODULES } from './modules.js';
 import { RETAIL_NAVIGATION } from './navigation.js';
 
 /**
- * D154 — the goods a retail workspace's document previews show.
+ * D165 — the goods a retail workspace's document previews show.
  *
  * Clothing AND groceries in one list, because RETAIL is a single business
  * type covering both (Q12 resolved not to split it) and a sample showing only
  * one would look wrong to half the workspaces that see it. The same reasoning,
- * and deliberately the same goods, as the thermal bill's sample (D153), so a
+ * and deliberately the same goods, as the thermal bill's sample (D164), so a
  * shop's two documents illustrate the same shop.
  *
  * One line carries a `pack`, so the preview still exercises the multiplied-
@@ -138,13 +138,13 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
     catalogue: {
       ...RETAIL_CAPABILITIES.catalogue,
       measuredGoods: true,
-      // D150 — a clothing shop and a grocer track different things about a
+      // D161 — a clothing shop and a grocer track different things about a
       // product, and the five fields declared below are the CLOTHING answer.
       // Retail is the domain that has to serve both, so it is the domain that
       // gets to redefine them. Spread for the same reason `measuredGoods` is:
       // `RETAIL_CAPABILITIES` is the hardware template too.
       configurableBusinessDetails: true,
-      // D151 — the attribute library is retail's, not hardware's. Both read
+      // D162 — the attribute library is retail's, not hardware's. Both read
       // `RETAIL_CAPABILITIES`, so declaring it there would hand the tab to a
       // hardware counter that types a variation when it needs one and keeps no
       // library of them. Same reason `measuredGoods` sits here. `internalBarcodes`
@@ -152,7 +152,7 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
       // keeps it too, and restating it here would invite the two to drift.
       attributeLibrary: true,
     },
-    // D152 — retail's bill prints on a roll. Spread onto the descriptor, not
+    // D163 — retail's bill prints on a roll. Spread onto the descriptor, not
     // into `RETAIL_CAPABILITIES`, because that constant IS the hardware
     // template and hardware still prints an A4 bill. `a4Documents` stays true
     // through the spread: a shop quotes on a letterhead even though its bill
@@ -207,7 +207,7 @@ export const RETAIL_DOMAIN: DomainDescriptor = {
    * a commitment, not a sketch.
    */
   catalogue: {
-    // D154 — a clothing shop previewing a quotation sees clothing.
+    // D165 — a clothing shop previewing a quotation sees clothing.
     sampleItems: RETAIL_SAMPLE_ITEMS,
     attributeSchema: [
       // "60% cotton, 40% polyester" — free text because the combinations are

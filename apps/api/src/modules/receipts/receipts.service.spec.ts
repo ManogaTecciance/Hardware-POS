@@ -18,11 +18,11 @@ beforeEach(() => {
 });
 
 /**
- * D165 — a reprint keeps the tender the first print recorded.
+ * D186 — a reprint keeps the tender the first print recorded.
  *
  * ## What was reported
  *
- * D162–D164 put "Cash" and "Balance" on the receipt printed at the till, and
+ * D183–D185 put "Cash" and "Balance" on the receipt printed at the till, and
  * viewing the same bill from Sales still showed `Balance 0.00`.
  *
  * ## The cause, and why no migration was needed
@@ -117,14 +117,14 @@ function setup(storedContent: unknown, logoUrl: string | null = null): Stub {
       currency: 'LKR',
       receiptFooter: 'Thank you for your purchase!',
       timezone: 'Asia/Colombo',
-      // D172 — the bill reads the SAME `documents.logoUrl` the A4 letterhead
+      // D193 — the bill reads the SAME `documents.logoUrl` the A4 letterhead
       // uses. One shop, one logo.
       documents: { logoUrl },
     }),
   } as unknown as SettingsService;
 
   /*
-   * D172 — `resolve` is what `inlineImage` calls, and returning a `redirect`
+   * D193 — `resolve` is what `inlineImage` calls, and returning a `redirect`
    * exercises the branch the S3 provider actually takes in this installation.
    * The bytes are a one-pixel GIF so the assertion is about the PLUMBING —
    * that real bytes reach the template as a data URI — and not about an image.
@@ -145,7 +145,7 @@ function text(html: string): string {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-describe('D165 — a reprint keeps the tender', () => {
+describe('D186 — a reprint keeps the tender', () => {
   it('renders the stored tender when the caller supplies none', async () => {
     // The reported defect: this is the reprint from Sales.
     const s = setup({ amountTendered: 4000 });
@@ -156,7 +156,7 @@ describe('D165 — a reprint keeps the tender', () => {
     expect(out).toContain('Paid Amount Rs. 4,000.00');
     expect(out).toContain('Bal. Amount Rs. 224.00');
     // …and the figure the ordinary layout would have printed in that same
-    // row is absent, so this is genuinely the short layout. Since D167 the
+    // row is absent, so this is genuinely the short layout. Since D188 the
     // two layouts share labels, so the VALUE is what tells them apart.
     expect(out).not.toContain('Paid Amount Rs. 3,776.00');
   });
@@ -172,7 +172,7 @@ describe('D165 — a reprint keeps the tender', () => {
 
     await s.service.generateCustomer('t1', 'sale_1', 'usr_1');
 
-    // D171 put `tenantId` first, so `content` is argument 3. The assertion
+    // D192 put `tenantId` first, so `content` is argument 3. The assertion
     // below is unchanged — this index reaches the same value it always did.
     const written = (s.repo.upsertReceipt as jest.Mock).mock.calls[0]?.[3] as {
       amountTendered?: number;
@@ -194,7 +194,7 @@ describe('D165 — a reprint keeps the tender', () => {
   it('renders as before when nothing is stored and nothing is supplied', async () => {
     /*
      * The isolation case. A card sale, a credit sale, a restaurant bill and
-     * every receipt printed before D162 have no tender on disk, and must print
+     * every receipt printed before D183 have no tender on disk, and must print
      * exactly what they always printed.
      */
     const s = setup(undefined);
@@ -234,7 +234,7 @@ describe('D165 — a reprint keeps the tender', () => {
 });
 
 /**
- * D172 — the shop's logo on the printed bill.
+ * D193 — the shop's logo on the printed bill.
  *
  * ## What makes these non-vacuous (D30)
  *
@@ -252,7 +252,7 @@ describe('D165 — a reprint keeps the tender', () => {
  * pass a test that only looked for the image, and a bill whose branding failed
  * to render would then carry nothing identifying the shop at all.
  */
-describe('D172 — the logo on the thermal bill', () => {
+describe('D193 — the logo on the thermal bill', () => {
   it('prints the logo as inlined bytes when one is configured', async () => {
     const s = setup(undefined, '/uploads/products/logo.webp');
 

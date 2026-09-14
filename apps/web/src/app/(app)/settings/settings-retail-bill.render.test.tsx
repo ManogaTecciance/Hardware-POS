@@ -1,5 +1,5 @@
 /**
- * D152 — a retail workspace's Settings: thermal bill, A4 quotations.
+ * D163 — a retail workspace's Settings: thermal bill, A4 quotations.
  *
  * ## Why a separate file from `settings-presentation.render.test.tsx`
  *
@@ -117,7 +117,7 @@ vi.mock('@/lib/restaurant/api', () => ({
   },
 }));
 
-// The Business details tab is retail-only (D150) and would issue a request the
+// The Business details tab is retail-only (D161) and would issue a request the
 // moment it mounts. Its own spec covers it; here it must not be the thing that
 // decides whether the page renders.
 vi.mock('@/lib/products/business-details-api', () => ({
@@ -167,7 +167,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe('D152 — the Branding tab keeps the letterhead retail still quotes on', () => {
+describe('D163 — the Branding tab keeps the letterhead retail still quotes on', () => {
   it('retail keeps the signature, stamp, accent colour and logo placement', async () => {
     await open('Branding');
 
@@ -193,7 +193,7 @@ describe('D152 — the Branding tab keeps the letterhead retail still quotes on'
   });
 });
 
-describe('D152 — the Layout tab gains the bill without losing the page', () => {
+describe('D163 — the Layout tab gains the bill without losing the page', () => {
   it('retail gets the bill summary AND the A4 page setup', async () => {
     await open('Layout');
 
@@ -216,7 +216,7 @@ describe('D152 — the Layout tab gains the bill without losing the page', () =>
   });
 });
 
-describe('D152 — the Preview tab shows both documents', () => {
+describe('D163 — the Preview tab shows both documents', () => {
   it('retail previews the bill it prints and the quotation it sends', async () => {
     await open('Preview');
 
@@ -266,7 +266,7 @@ describe('D152 — the Preview tab shows both documents', () => {
   });
 });
 
-describe('D153 — the bill preview shows goods the workspace actually sells', () => {
+describe('D164 — the bill preview shows goods the workspace actually sells', () => {
   it('retail sees a shop basket, not a restaurant menu', async () => {
     await open('Preview');
     const bill = (screen.getByTitle('Bill preview') as HTMLIFrameElement).srcdoc;
@@ -314,11 +314,11 @@ describe('D153 — the bill preview shows goods the workspace actually sells', (
 });
 
 /**
- * D157 — the two previews share the tab instead of stacking.
+ * D168 — the two previews share the tab instead of stacking.
  *
  * ## The report
  *
- * D152 gave retail both previews by putting one under the other. A thermal
+ * D163 gave retail both previews by putting one under the other. A thermal
  * bill is a metre of paper, so reaching the quotation meant scrolling past a
  * whole receipt and neither document could be seen whole.
  *
@@ -339,7 +339,7 @@ describe('D153 — the bill preview shows goods the workspace actually sells', (
  * one document each and must gain no toggle at all. Each asserts the preview
  * they DO have, so "no tabs" cannot pass because the page rendered nothing.
  */
-describe('D157 — the Preview tab switches between the two documents', () => {
+describe('D168 — the Preview tab switches between the two documents', () => {
   /** The one panel a user can actually see. Throws if the layout stacks. */
   const visiblePanel = () => screen.getByRole('tabpanel');
 

@@ -75,7 +75,7 @@ import { ProductVariantsService } from './variants/product-variants.service';
     // ('sellable', 'attribute-schema').
     SellableController,
     ProductAttributeSchemaController,
-    // D150 — the tenant's own business-detail field list. Static, so it must
+    // D161 — the tenant's own business-detail field list. Static, so it must
     // register above `GET /products/:id` like its neighbours.
     BusinessDetailsController,
     // D125 — the tenant option library. Its own root path, so it does not

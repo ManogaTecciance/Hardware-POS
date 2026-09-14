@@ -2,7 +2,7 @@
  * Kandy Apparel — generated catalogue, do NOT hand-edit.
  *
  * Exported from the `kandy-apparel` workspace by `prisma/export-catalogue.ts`
- * (D170). Pure data with no runtime dependencies, the same contract
+ * (D191). Pure data with no runtime dependencies, the same contract
  * `mock-catalog.ts` keeps, so the Prisma seed and the API can both import it.
  *
  * Contains no ids or timestamps: a pack is applied by natural key (category

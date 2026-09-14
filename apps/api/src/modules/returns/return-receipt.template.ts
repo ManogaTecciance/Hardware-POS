@@ -20,9 +20,9 @@ export interface ReturnReceiptLine {
 export interface ReturnReceiptData {
   storeName: string;
   /**
-   * D174 — the shop's logo, already inlined as a `data:` URI.
+   * D195 — the shop's logo, already inlined as a `data:` URI.
    *
-   * D172 put this on the sales receipt and the A4 letterhead and missed the
+   * D193 put this on the sales receipt and the A4 letterhead and missed the
    * return, which is the one a customer is handed while they are unhappy. Same
    * field, same contract: a `data:` URI and not a path, because this HTML is
    * printed from a hidden iframe in the web app where `/uploads/<key>` would
@@ -70,9 +70,9 @@ function money(amount: number): string {
 const PRINT_BUTTON = `<button class="no-print print-btn" onclick="window.print()">Print</button>`;
 
 /**
- * D174 — the logo above the shop name, when there is one.
+ * D195 — the logo above the shop name, when there is one.
  *
- * The NAME is never replaced by the logo, for the reason D172 gives: a roll is
+ * The NAME is never replaced by the logo, for the reason D193 gives: a roll is
  * 80mm and monochrome, and a logo that prints as a grey smear on a refund slip
  * carrying no shop name is worse than no logo. On THIS receipt it matters more
  * than on the sales one — a refund slip is the document a customer keeps to
@@ -102,7 +102,7 @@ export function renderReturnReceipt(d: ReturnReceiptData): string {
   * { box-sizing: border-box; }
   body { font-family: ui-monospace, "Courier New", monospace; color: #111; margin: 0; padding: 16px; }
   .receipt { max-width: 320px; margin: 0 auto; }
-  /* D174 — sized in mm because the output is paper, not a screen. */
+  /* D195 — sized in mm because the output is paper, not a screen. */
   .logo { text-align: center; margin-bottom: 6px; }
   .logo img { max-height: 18mm; max-width: 100%; object-fit: contain; }
   h1 { font-size: 18px; text-align: center; margin: 0 0 2px; }

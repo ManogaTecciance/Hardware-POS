@@ -176,7 +176,7 @@ describe('thermal sale receipt with null external accounting metadata', () => {
     assertSafeDocument(html);
     /*
      * The balance is what tells the customer this is unpaid — not a QuickBooks
-     * type. D167 renamed the THERMAL bill's rows to the trade's words
+     * type. D188 renamed the THERMAL bill's rows to the trade's words
      * (Total → Bill Amount, Cash → Paid Amount, Balance → Bal. Amount) and did
      * not update this spec, because the integration suite was not run. The
      * claim is unchanged; only the label it is matched against.
@@ -199,7 +199,7 @@ describe('thermal sale receipt with null external accounting metadata', () => {
     const html = await thermalReceiptHtml(sale);
 
     assertSafeDocument(html);
-    // D167's wording, same claim — see the credit-sale case above.
+    // D188's wording, same claim — see the credit-sale case above.
     expect(html).toMatch(/Bal\. Amount/i);
     expect(html).toContain('PARTIAL');
     expect(html).toContain(sale.saleNumber);

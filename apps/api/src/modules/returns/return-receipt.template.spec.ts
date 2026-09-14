@@ -1,7 +1,7 @@
 /**
- * D174 — the shop's logo on the refund slip.
+ * D195 — the shop's logo on the refund slip.
  *
- * D172 put the logo on the sales receipt and the A4 letterhead and **missed
+ * D193 put the logo on the sales receipt and the A4 letterhead and **missed
  * this one**, which is the receipt a customer is handed while they are already
  * unhappy and the one they keep as proof the shop took the goods back.
  *
@@ -9,7 +9,7 @@
  *
  * The positive case asserts the bytes arrive as a `data:` URI, not merely that
  * an `<img>` exists. A template emitting `src="/uploads/…"` would satisfy
- * "there is an image" and print a broken icon — that was exactly D172's A4
+ * "there is an image" and print a broken icon — that was exactly D193's A4
  * defect, and repeating it here would be repeating it knowingly.
  *
  * The negative case is what stops the change reaching tenants it should not.
@@ -73,12 +73,12 @@ function text(html: string): string {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-describe('D174 — the logo on the refund slip', () => {
+describe('D195 — the logo on the refund slip', () => {
   it('prints the logo as inlined bytes when one is configured', () => {
     const html = renderReturnReceipt(makeReceipt({ logoDataUri: LOGO }));
 
     expect(html).toContain('<img src="data:image/webp;base64,');
-    // Not a path. A src the print iframe cannot resolve is D172's A4 defect.
+    // Not a path. A src the print iframe cannot resolve is D193's A4 defect.
     expect(html).not.toContain('src="/uploads/');
     expect(text(html)).toContain('Kandy Apparel');
   });

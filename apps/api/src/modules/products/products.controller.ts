@@ -110,8 +110,8 @@ export class ProductsController {
   @Get('import/template')
   @RequirePermissions(Permission.PRODUCT_MANAGE)
   async importTemplate(@TenantId() tenantId: string, @Res() res: Response): Promise<void> {
-    // D168 — per tenant: the sheet carries THIS workspace's business-detail
-    // columns, because D150 made those fields the tenant's own.
+    // D189 — per tenant: the sheet carries THIS workspace's business-detail
+    // columns, because D161 made those fields the tenant's own.
     const buffer = await this.productsImportService.buildTemplate(tenantId);
     res.setHeader(
       'Content-Type',

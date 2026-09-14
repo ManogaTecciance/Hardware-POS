@@ -30,7 +30,7 @@ export interface ParsedProductRow {
   expenseAccount: string | null;
   inventoryAssetAccount: string | null;
   /**
-   * D168 — the tenant's business details (D150), keyed by field `key`.
+   * D189 — the tenant's business details (D161), keyed by field `key`.
    *
    * `undefined` means the sheet said nothing about them, which is NOT the
    * same as `{}`: D64 gives the attributes document replace semantics, so an
@@ -150,7 +150,7 @@ function asItemType(v: string | number | Date): ProductType {
 }
 
 /**
- * D168 — one business-detail cell, as the type its field declares.
+ * D189 — one business-detail cell, as the type its field declares.
  *
  * A value that cannot be read as its type is returned AS TEXT rather than
  * dropped or coerced to zero: `validateAttributes` then produces the real
@@ -224,7 +224,7 @@ export class ProductsImportService {
    * A ready-to-fill .xlsx template: the QuickBooks headers, plus this
    * TENANT's business details, plus example rows.
    *
-   * D168 — the extra columns are per tenant because D150 made the fields
+   * D189 — the extra columns are per tenant because D161 made the fields
    * per tenant. A clothing shop that configured Material, Fit and Season
    * downloads a sheet with those three columns under their own labels; a
    * hardware workspace that configured none downloads exactly the sheet it
@@ -295,7 +295,7 @@ export class ProductsImportService {
       });
 
       /*
-       * D168 — the business details this row states, if any.
+       * D189 — the business details this row states, if any.
        *
        * Validated with the SAME function the API uses, so the preview's
        * message and the eventual refusal are one piece of code.
@@ -405,7 +405,7 @@ export class ProductsImportService {
       quantityOnHand: isInventory ? (row.quantityOnHand ?? 0) : 0,
       quantityAsOfDate: isInventory ? (row.quantityAsOfDate ?? undefined) : undefined,
       reorderLevel: isInventory ? (row.reorderLevel ?? undefined) : undefined,
-      // D168 — omitted, not `{}`, when the sheet said nothing: D64's replace
+      // D189 — omitted, not `{}`, when the sheet said nothing: D64's replace
       // semantics would otherwise erase a product's stored details on update.
       ...(row.attributes !== undefined ? { attributes: row.attributes } : {}),
     };

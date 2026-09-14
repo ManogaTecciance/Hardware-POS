@@ -18,7 +18,7 @@ import { RETAIL_MODULES, SHARED_CORE_MODULES } from './modules.js';
 import { RETAIL_NAVIGATION } from './navigation.js';
 
 /**
- * D154 — the goods hardware's document previews are illustrated with.
+ * D165 — the goods hardware's document previews are illustrated with.
  *
  * These eight lines were the ONLY sample catalogue in the product, living in
  * `documents.service.ts` and shown to every workspace regardless of trade — so
@@ -74,7 +74,7 @@ export const HARDWARE_DOMAIN: DomainDescriptor = {
   // schema means every `attributes` key is refused — declared, not defaulted.
   catalogue: {
     attributeSchema: [],
-    // D154 — declared, not inherited. The fallback for a descriptor that
+    // D165 — declared, not inherited. The fallback for a descriptor that
     // says nothing is a NEUTRAL list, so hardware has to name its own goods
     // to keep the preview it has always had.
     sampleItems: HARDWARE_SAMPLE_ITEMS,

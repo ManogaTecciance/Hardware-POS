@@ -28,7 +28,7 @@ export class ImportProductRowDto {
   rowNumber!: number;
 
   /**
-   * D168 — the tenant's business details (D150) read from the sheet.
+   * D189 — the tenant's business details (D161) read from the sheet.
    *
    * Round-tripped from the preview rather than re-read, so the rows the
    * operator reviewed are the rows that are written.

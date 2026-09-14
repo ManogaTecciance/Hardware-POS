@@ -1,5 +1,5 @@
 /**
- * D172 — turn a stored image into a `data:` URI so a document carries its own
+ * D193 — turn a stored image into a `data:` URI so a document carries its own
  * pictures.
  *
  * ## Why a document cannot use a URL

@@ -193,7 +193,7 @@ export function AdminDashboard({
       ? [{ key: 'product', label: 'Add Product', href: '/products/new', icon: PackagePlus }]
       : []),
     /*
-     * D161 — `/reports`, not `/sales`.
+     * D172 — `/reports`, not `/sales`.
      *
      * The KPI cards above deliberately drill into the record list a metric
      * came from, and several of them land on `/sales` for that reason. This

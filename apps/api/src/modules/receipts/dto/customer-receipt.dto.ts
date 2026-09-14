@@ -1,7 +1,7 @@
 import { IsNumber, IsOptional, IsPositive } from 'class-validator';
 
 /**
- * D162 — options for `POST /receipts/:saleId/customer`.
+ * D183 — options for `POST /receipts/:saleId/customer`.
  *
  * Every field is optional, and the body may be omitted entirely: the reprint
  * path calls this endpoint with no body at all, and must keep working exactly

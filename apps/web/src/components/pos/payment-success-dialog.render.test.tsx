@@ -6,17 +6,17 @@ import { SuccessView } from './payment-success-dialog';
 import type { CompletedSale } from '@/lib/sales';
 
 /**
- * D166 — the payment-complete dialog offers the bill this workspace issues.
+ * D187 — the payment-complete dialog offers the bill this workspace issues.
  *
  * ## What was reported
  *
  * On a RETAIL till, completing a sale opened a dialog whose primary action was
- * **Print A4 Bill**, beside **Preview A4 Bill** — for a document D152 removed
+ * **Print A4 Bill**, beside **Preview A4 Bill** — for a document D163 removed
  * from retail — with the receipt demoted to a text link between them.
  *
  * ## Why nothing caught it
  *
- * D152 gated the Settings screen, the sale page and the "print after payment"
+ * D163 gated the Settings screen, the sale page and the "print after payment"
  * toggle on `showA4SaleDocument`. This dialog never consulted it: the page
  * computed `canPrintA4` on line 140 and did not pass it in. Nothing rendered
  * this page, so no test could see it — the component was extracted from
@@ -58,7 +58,7 @@ function mount(canPrintA4: boolean) {
 
 afterEach(cleanup);
 
-describe('D166 — the bill the payment dialog offers', () => {
+describe('D187 — the bill the payment dialog offers', () => {
   it('a retail till offers the receipt, and no A4 at all', () => {
     mount(false);
 
@@ -77,7 +77,7 @@ describe('D166 — the bill the payment dialog offers', () => {
 
   it('a hardware till keeps both A4 actions, against the same component', () => {
     /*
-     * The paired half. D152 took the A4 from RETAIL only; hardware still
+     * The paired half. D163 took the A4 from RETAIL only; hardware still
      * issues one, and removing it there would be a regression in another
      * workspace's core flow.
      */

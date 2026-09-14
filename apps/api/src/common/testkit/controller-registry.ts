@@ -158,7 +158,7 @@ export const ALL_CONTROLLERS: (new (...args: any[]) => object)[] = [
   SellableController,
   // D64 — Phase 7 attribute schema read.
   ProductAttributeSchemaController,
-  // D150 — the tenant's own business details. Permission-gated, not
+  // D161 — the tenant's own business details. Permission-gated, not
   // module-gated: whether a workspace may define its own catalogue fields is
   // a CAPABILITY of its business type, which the service reads (D56). A module
   // gate would be a second, weaker answer to the same question.
@@ -211,7 +211,7 @@ export const REGISTERED_CONTROLLER_FILES: readonly string[] = [
   'products',
   // D64 — Phase 7.
   'product-attribute-schema',
-  // D150 — Phase 5.12.
+  // D161 — Phase 5.12.
   'business-details',
   // D65 — Phase 8.
   'product-components',

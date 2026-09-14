@@ -8,14 +8,14 @@ import type { PrismaService } from '../../prisma/prisma.service';
 import type { CreateProductDto } from './dto/create-product.dto';
 
 /**
- * D168 — the import template carries the tenant's own business details.
+ * D189 — the import template carries the tenant's own business details.
  *
  * ## What was reported
  *
  * "template was little bit wrong now after the changes … because we add
  * business details from settings".
  *
- * Correct: D150 made the catalogue's descriptive fields the TENANT's own, and
+ * Correct: D161 made the catalogue's descriptive fields the TENANT's own, and
  * the import template was a fixed list of fourteen QuickBooks columns written
  * long before it. A clothing shop that had configured Material, Fit and Season
  * could set them one product at a time in the wizard and not at all in a sheet
@@ -110,7 +110,7 @@ const QB = [
   'Inventory asset account',
 ];
 
-describe('D168 — the template carries the tenant’s business details', () => {
+describe('D189 — the template carries the tenant’s business details', () => {
   it('appends one column per configured field, under the tenant’s own label', async () => {
     const { service } = setup(CLOTHING);
 
@@ -206,7 +206,7 @@ describe('D168 — the template carries the tenant’s business details', () => 
   it('carries the attributes through commit onto the product', async () => {
     /*
      * The end of the chain. Everything above could pass while `commit` dropped
-     * the field on the floor — which is exactly what it did before D168.
+     * the field on the floor — which is exactly what it did before D189.
      */
     const { service, created } = setup(CLOTHING);
 

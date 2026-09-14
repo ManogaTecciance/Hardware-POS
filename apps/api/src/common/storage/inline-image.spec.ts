@@ -1,5 +1,5 @@
 /**
- * D172 — `inlineImage`, the piece both the A4 letterhead and the thermal bill
+ * D193 — `inlineImage`, the piece both the A4 letterhead and the thermal bill
  * depend on.
  *
  * ## What makes these non-vacuous (D30)

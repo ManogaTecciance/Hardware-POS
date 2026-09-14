@@ -80,7 +80,7 @@ const SETTINGS = {
   highDiscountThresholdPercent: 10,
   receiptFooter: 'Thanks',
   returns: RETURN_SETTINGS,
-  // D174 — the refund slip reads the same `documents.logoUrl` the sales bill
+  // D195 — the refund slip reads the same `documents.logoUrl` the sales bill
   // and the A4 letterhead read. Null here: these specs assert the return's
   // money and document decisions, and a tenant with no logo uploaded is the
   // state they were written against.
@@ -130,7 +130,7 @@ function makeService(repo: Partial<ReturnsRepository>) {
     syncQueue,
     accounting,
     inventory,
-    // D174 — resolves nothing, matching SETTINGS above. `inline-image.spec`
+    // D195 — resolves nothing, matching SETTINGS above. `inline-image.spec`
     // covers the resolving behaviour itself.
     { resolve: jest.fn(async () => null) } as never,
   );

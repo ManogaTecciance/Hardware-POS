@@ -66,7 +66,7 @@ Seeded logins — four workspaces, one per trade the POS serves:
 | `clothing-demo` | `owner@kandyapparel.test` / `Retail123!` (approver PIN `6666`), `cashier@kandyapparel.test` / `Retail123!` (approver PIN `7777`) | **Kandy Apparel** — retail clothing, local inventory, no accounting |
 | `grocery-demo` | `owner@grocery.test` / `Retail123!` (approver PIN `8888`), `cashier@grocery.test` / `Retail123!` (approver PIN `9999`) | **Colombo Grocery Mart** — retail grocery, local inventory, no accounting |
 
-### The two retail workspaces (D170)
+### The two retail workspaces (D191)
 
 `RETAIL` covers both trades, and they exercise opposite halves of the catalogue,
 so one demo tenant could only ever show you half the product model:

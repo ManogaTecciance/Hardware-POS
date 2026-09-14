@@ -36,9 +36,9 @@ interface Props {
   state: WizardState;
   errors: Record<string, string>;
   /**
-   * D159 — "Step 3 of 5", computed by the shell from the step list.
+   * D170 — "Step 3 of 5", computed by the shell from the step list.
    *
-   * A literal reading "of 4" until D150 added a fifth step. The list is
+   * A literal reading "of 4" until D161 added a fifth step. The list is
    * per-tenant, so no literal can be right for every workspace.
    */
   positionLabel: string;
@@ -173,7 +173,7 @@ function SimpleForm({
   state: WizardState;
   errors: Record<string, string>;
   isLocal: boolean;
-  /** D159 — for the opening-stock branch, which a single product now has too. */
+  /** D170 — for the opening-stock branch, which a single product now has too. */
   branches: BranchSummary[];
   onChange: (patch: Partial<WizardState>) => void;
 }) {
@@ -184,7 +184,7 @@ function SimpleForm({
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 rounded-2xl border border-border bg-card p-4 md:grid-cols-2">
         {/*
-          D159 — NOT `required`, and the button is what makes the placeholder
+          D170 — NOT `required`, and the button is what makes the placeholder
           true. This field used to carry a red asterisk AND read "or leave
           blank to generate": the validator rejected blank, and nothing in the
           codebase generated a product SKU, so neither half of the promise
@@ -285,7 +285,7 @@ function SimpleForm({
         ) : null}
       </div>
 
-      {/* D159 — a receipt has to land somewhere, single product or not. */}
+      {/* D170 — a receipt has to land somewhere, single product or not. */}
       {isLocal && Number(state.simple.openingQuantity) > 0 ? (
         <OpeningBranchCard
           state={state}
@@ -299,7 +299,7 @@ function SimpleForm({
 }
 
 /**
- * D159 — one opening-stock branch control, shared by both shapes.
+ * D170 — one opening-stock branch control, shared by both shapes.
  *
  * It lived inside the variant matrix, which is part of how a single
  * product came to have opening stock with nowhere to put it. Extracted
@@ -799,7 +799,7 @@ function Field({
   htmlFor?: string;
   required?: boolean;
   error?: string;
-  /** D159 — a control that belongs TO the field, e.g. "Generate". */
+  /** D170 — a control that belongs TO the field, e.g. "Generate". */
   action?: React.ReactNode;
   children: React.ReactNode;
 }) {

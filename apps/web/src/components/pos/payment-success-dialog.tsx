@@ -26,7 +26,7 @@ export function SuccessView({
   onPrintA4: () => void;
   onPrintThermal: () => void;
   /**
-   * D166 — D152's capability, which this dialog never consulted.
+   * D187 — D163's capability, which this dialog never consulted.
    *
    * A retail sale is on the roll before this dialog opens, and it was
    * still offering **Print A4 Bill** as its primary action for a document
@@ -102,7 +102,7 @@ export function SuccessView({
             </>
           ) : (
             /*
-             * D166 — one bill, so one button. The receipt has already
+             * D187 — one bill, so one button. The receipt has already
              * printed itself if the toggle was on; this is the reprint for
              * the customer who asks for a second copy, and it is the
              * PRIMARY action because it is the only document this

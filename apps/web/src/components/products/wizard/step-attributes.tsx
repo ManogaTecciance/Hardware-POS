@@ -84,7 +84,7 @@ export function StepAttributes({ state, errors, schema, positionLabel, onChange 
               </Select>
             ) : field.type === 'date' ? (
               /*
-               * D150 -- a real date input, so the operator gets the platform's
+               * D161 -- a real date input, so the operator gets the platform's
                * own calendar and its own locale formatting.
                *
                * `type="date"` is the one control here that constrains what can

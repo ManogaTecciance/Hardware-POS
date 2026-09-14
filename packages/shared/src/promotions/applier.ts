@@ -840,7 +840,7 @@ export function outstandingRewards(context: PromotionContext): OutstandingReward
     .filter((r) => r.outstanding > 0);
 }
 
-/** D155 — an offer the basket is close to, but has not reached. */
+/** D166 — an offer the basket is close to, but has not reached. */
 export interface RewardUpsell {
   promotionId: string;
   promotionName: string;
@@ -853,7 +853,7 @@ export interface RewardUpsell {
 }
 
 /**
- * D155/D160 — a SAME-PRODUCT reward the basket is one step short of.
+ * D166/D171 — a SAME-PRODUCT reward the basket is one step short of.
  *
  * ## The gap this fills
  *
@@ -864,9 +864,9 @@ export interface RewardUpsell {
  *
  * What changed is what the TILL does about it.
  *
- * ## D160 — this now gates payment, and D155 said it never would
+ * ## D171 — this now gates payment, and D166 said it never would
  *
- * D155 called this an offer to decline and kept it out of `canPay`,
+ * D166 called this an offer to decline and kept it out of `canPay`,
  * reasoning that refusing a five-tie sale is hostile. The PO reversed that
  * deliberately: a customer who qualified for a free item must not be let
  * out of the shop without it, and every BUY_X_GET_Y is to behave the same
@@ -893,7 +893,7 @@ export interface RewardUpsell {
  * would be a second, weaker voice on the same offer.
  */
 /**
- * D160 — every BUY_X_GET_Y this basket has not finished, as one list.
+ * D171 — every BUY_X_GET_Y this basket has not finished, as one list.
  *
  * ## Why this exists rather than two lists at the call site
  *
@@ -941,7 +941,7 @@ export function incompleteOffers(context: PromotionContext): IncompleteOffer[] {
   ];
 }
 
-/** One unfinished offer, whichever of the two shapes produced it (D160). */
+/** One unfinished offer, whichever of the two shapes produced it (D171). */
 export interface IncompleteOffer {
   promotionId: string;
   promotionName: string;

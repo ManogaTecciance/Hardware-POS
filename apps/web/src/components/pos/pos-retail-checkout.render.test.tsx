@@ -207,11 +207,11 @@ describe('PosRetailCheckout — clearing the cart (D145)', () => {
 });
 
 /**
- * D160 — every unfinished BUY_X_GET_Y blocks, and says so the same way.
+ * D171 — every unfinished BUY_X_GET_Y blocks, and says so the same way.
  *
  * ## What changed, and why these assertions were rewritten
  *
- * D155 shipped a same-product prompt that deliberately did NOT block payment,
+ * D166 shipped a same-product prompt that deliberately did NOT block payment,
  * reasoning that five ties at full price is a real sale. Two assertions here
  * pinned that: one required Proceed to Payment to stay ENABLED, and one
  * required the muted prompt to be suppressed while a debt was live.
@@ -236,7 +236,7 @@ describe('PosRetailCheckout — clearing the cart (D145)', () => {
  * freely. Without them, "blocks payment" would pass for a till whose button
  * is simply always disabled.
  */
-describe('D160 — unfinished offers block, whichever shape they are', () => {
+describe('D171 — unfinished offers block, whichever shape they are', () => {
   /** Buy 5 get 1 on ONE product: six for the price of five. */
   const sameProductOffer = {
     id: 'r_tie',
@@ -287,7 +287,7 @@ describe('D160 — unfinished offers block, whichever shape they are', () => {
 
   it('a same-product offer one unit short blocks payment', () => {
     /*
-     * The reversal, stated as an assertion. D155 required the opposite here.
+     * The reversal, stated as an assertion. D166 required the opposite here.
      * The accepted cost: a customer who wants exactly five ties cannot be
      * served until the sixth — which is free — is added.
      */
@@ -345,7 +345,7 @@ describe('D160 — unfinished offers block, whichever shape they are', () => {
 
   it('names both offers when both are short, rather than hiding one', () => {
     /*
-     * D155 suppressed the same-product prompt while a debt was live, so the
+     * D166 suppressed the same-product prompt while a debt was live, so the
      * cashier read one instruction at a time and the blocking one won. Both
      * block now, so both are named: hiding one would leave the cashier
      * completing an offer and finding the button still disabled with no

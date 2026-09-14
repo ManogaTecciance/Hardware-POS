@@ -1050,7 +1050,7 @@ describe('StepAttributes', () => {
 });
 
 /**
- * D150 — the calendar-date field a tenant can now define for itself.
+ * D161 — the calendar-date field a tenant can now define for itself.
  *
  * ## What makes these assertions non-vacuous
  *
@@ -1070,7 +1070,7 @@ const TENANT_SCHEMA: readonly AttributeField[] = [
   { key: 'launchDate', label: 'Launch date', type: 'date' },
 ];
 
-describe('D150 — a tenant-defined calendar date', () => {
+describe('D161 — a tenant-defined calendar date', () => {
   function Harness({ state }: { state: WizardState }) {
     const h = useHarness(state);
     const errors = validateStep('attributes', h.state, {
@@ -1211,7 +1211,7 @@ describe('validateStep — DTO-mirroring field rules', () => {
     // Positive — real values pass, and so does the untouched (empty) state.
     // Without this half the checks above would read as "these are required".
     //
-    // D159 — the branch is part of the positive case now: an opening
+    // D170 — the branch is part of the positive case now: an opening
     // quantity is posted as an inventory receipt, and a receipt has to land
     // somewhere. The assertion still says what it always said (these three
     // values are acceptable); it just supplies the branch that makes an
@@ -1606,7 +1606,7 @@ describe('wizard-state helpers', () => {
 
     // Step 'pricing' — a missing price is an error; a missing SKU is not.
     //
-    // D159 — this pair used to assert that BOTH fired. SKU is optional on
+    // D170 — this pair used to assert that BOTH fired. SKU is optional on
     // the server (nullable column, `@IsOptional()`, `dto.sku ?? null`), and
     // the wizard's own placeholder offered to generate one, so requiring it
     // here was the single thing making that offer impossible to accept.

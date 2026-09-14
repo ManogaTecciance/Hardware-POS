@@ -1323,7 +1323,7 @@ model Discount {
 model Receipt {
   id String @id @default(cuid())
 
-  /// D171 — denormalised from `sale.tenantId`, and the reason the unique below
+  /// D192 — denormalised from `sale.tenantId`, and the reason the unique below
   /// can exist. Mirrors `InventoryReceipt`, which has carried the same pair
   /// since it was introduced.
   tenantId      String

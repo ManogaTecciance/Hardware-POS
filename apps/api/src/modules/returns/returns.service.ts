@@ -90,7 +90,7 @@ export class ReturnsService {
     private readonly accountingProviders: AccountingProviderFactory,
     private readonly inventoryProviders: InventoryProviderFactory,
     /**
-     * D174 — reads the logo's bytes so the refund slip carries them.
+     * D195 — reads the logo's bytes so the refund slip carries them.
      *
      * Appended, not slotted in: this constructor is called positionally in
      * specs, and inserting a parameter in the middle shifts every argument
@@ -846,7 +846,7 @@ export class ReturnsService {
   ): Promise<{ printJobId: string; html: string }> {
     const settings = this.settingsService.getSettings(tenantId);
     /*
-     * D174 — the SAME `documents.logoUrl` the sales bill and the A4 letterhead
+     * D195 — the SAME `documents.logoUrl` the sales bill and the A4 letterhead
      * use. One shop, one logo: asking an operator to upload it per document is
      * how a refund slip ends up showing a different mark from the bill it
      * reverses. `inlineImage` caches and never throws.

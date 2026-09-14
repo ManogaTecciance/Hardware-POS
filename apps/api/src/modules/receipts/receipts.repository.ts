@@ -37,7 +37,7 @@ export class ReceiptsRepository {
   }
 
   /**
-   * D171 — `tenantId` is written on create, and deliberately NOT on update.
+   * D192 — `tenantId` is written on create, and deliberately NOT on update.
    *
    * A receipt belongs to the tenant of its sale and a sale never changes hands,
    * so the only honest moment to set it is creation. Putting it in `update`

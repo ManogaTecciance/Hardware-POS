@@ -41,7 +41,7 @@ export interface ReceiptLine {
 export interface CustomerReceiptData {
   storeName: string;
   /**
-   * D172 — the shop's logo, already inlined as a `data:` URI.
+   * D193 — the shop's logo, already inlined as a `data:` URI.
    *
    * A `data:` URI and not a path, because this HTML is printed from a hidden
    * iframe in the WEB app (D78) and `/uploads/<key>` would resolve against the
@@ -49,7 +49,7 @@ export interface CustomerReceiptData {
    * only places it.
    *
    * Optional, and absent means no logo — the receipt then prints exactly what it
-   * printed before D172, which is what every tenant without one gets.
+   * printed before D193, which is what every tenant without one gets.
    */
   logoDataUri?: string | null;
   saleNumber: string;
@@ -84,7 +84,7 @@ export interface CustomerReceiptData {
   balanceAmount: number;
   paymentStatus: string;
   /**
-   * D162 — cash actually handed over, when it exceeded the total.
+   * D183 — cash actually handed over, when it exceeded the total.
    *
    * Optional, and absent on every document that does not have one: a card
    * sale, a credit sale, a restaurant bill, and every receipt REPRINTED
@@ -103,7 +103,7 @@ export interface CustomerReceiptData {
 }
 
 /**
- * D162/D164 — the change owed back, or null when there is none to print.
+ * D183/D185 — the change owed back, or null when there is none to print.
  *
  * The caller passes only what it observed — the amount handed over — so the
  * change is derived here and cannot contradict the amounts printed beside it.
@@ -115,7 +115,7 @@ export interface CustomerReceiptData {
  * arrive with no tender at all and take the same path.
  */
 /**
- * D172 — the logo above the shop name, when there is one.
+ * D193 — the logo above the shop name, when there is one.
  *
  * The NAME is never replaced by the logo. A roll is 80mm and monochrome: a
  * colour image dithers, and a logo that prints as a grey smear on a bill with
@@ -143,11 +143,11 @@ function row(label: string, amount: number, currency: string): string {
 }
 
 /**
- * D164 — what the customer actually needs to read, and nothing twice.
+ * D185 — what the customer actually needs to read, and nothing twice.
  *
  * ## The report
  *
- * After D162/D163 a cash sale with change printed SEVEN rows, three of which
+ * After D183/D184 a cash sale with change printed SEVEN rows, three of which
  * carried the same number:
  *
  *     Total 3,200 | Paid 3,200 | Balance 0.00
@@ -188,7 +188,7 @@ function row(label: string, amount: number, currency: string): string {
  * is the only record of how it was settled.
  */
 /*
- * D167 — the wording is the restaurant bill's, because it is the trade's.
+ * D188 — the wording is the restaurant bill's, because it is the trade's.
  *
  * `thermal-bill.ts` has printed `Bill Amount` / `Paid Amount` / `Bal. Amount`
  * on every food-service slip since it was written, and a Sri Lankan customer
@@ -305,7 +305,7 @@ export function renderCustomerReceipt(d: CustomerReceiptData): string {
   * { box-sizing: border-box; }
   body { font-family: ui-monospace, "Courier New", monospace; color: #111; margin: 0; padding: 16px; }
   .receipt { max-width: 320px; margin: 0 auto; }
-  /* D172 — sized in mm because the output is paper, not a screen. */
+  /* D193 — sized in mm because the output is paper, not a screen. */
   .logo { text-align: center; margin-bottom: 6px; }
   .logo img { max-height: 18mm; max-width: 100%; object-fit: contain; }
   h1 { font-size: 18px; text-align: center; margin: 0 0 2px; }

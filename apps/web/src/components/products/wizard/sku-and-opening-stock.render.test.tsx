@@ -1,5 +1,5 @@
 /**
- * D159 — the SKU you can generate, and the opening stock that actually lands.
+ * D170 — the SKU you can generate, and the opening stock that actually lands.
  *
  * ## What was reported
  *
@@ -75,7 +75,7 @@ function Harness({ initial }: { initial?: WizardState }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('D159 — suggestSku', () => {
+describe('D170 — suggestSku', () => {
   it('turns a product name into a SKU', () => {
     // An exact map, not a spot check. Each input exercises a different thing:
     // spaces, digits glued to letters, punctuation, and an already-clean name.
@@ -122,7 +122,7 @@ describe('D159 — suggestSku', () => {
   });
 });
 
-describe('D159 — randomSkuSuffix', () => {
+describe('D170 — randomSkuSuffix', () => {
   it('is three uppercase alphanumerics, and it varies', () => {
     const draws = Array.from({ length: 50 }, () => randomSkuSuffix());
 
@@ -133,7 +133,7 @@ describe('D159 — randomSkuSuffix', () => {
   });
 });
 
-describe('D159 — the SKU field', () => {
+describe('D170 — the SKU field', () => {
   it('fills the SKU from the product name when Generate is pressed', () => {
     render(<Harness initial={{ ...initialState(), name: 'Cement 50kg Bag' }} />);
 
@@ -171,7 +171,7 @@ describe('D159 — the SKU field', () => {
   });
 });
 
-describe('D159 — the opening-stock branch, for a single product', () => {
+describe('D170 — the opening-stock branch, for a single product', () => {
   const withOpening = (openingQuantity: string): WizardState => {
     const s = initialState();
     s.name = 'Cement';
@@ -206,7 +206,7 @@ describe('D159 — the opening-stock branch, for a single product', () => {
   });
 });
 
-describe('D159 — buildOpeningReceiptInput', () => {
+describe('D170 — buildOpeningReceiptInput', () => {
   const simple = (over: Partial<WizardState['simple']> = {}, branch = 'br_main'): WizardState => {
     const s = initialState();
     s.simple = { ...s.simple, unitPrice: '10', openingQuantity: '12', costPrice: '4.5', ...over };
@@ -254,7 +254,7 @@ describe('D159 — buildOpeningReceiptInput', () => {
   });
 });
 
-describe('D159 — the precision the receipt endpoint will actually accept', () => {
+describe('D170 — the precision the receipt endpoint will actually accept', () => {
   const withValues = (over: Partial<WizardState['simple']>): WizardState => {
     const s = initialState();
     s.name = 'Cement';
