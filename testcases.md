@@ -724,6 +724,9 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DOC-068 | A workspace with no logo prints exactly as before (D172) | On a workspace with no logo uploaded, print a bill and a quotation | No image element at all, business name intact. This is every tenant until someone uploads one | N | Not Run |
 | DOC-069 | A document still prints when the image cannot be read (D172) | Stop the storage service (or remove the uploaded file), then print a bill and a quotation | Both print without the picture. Branding is decoration — a receipt is the record of money that already moved, and a quotation that 500s over a logo is the worse outcome | N | Not Run |
 | DOC-070 | The printed document opens on another machine (D172) | Print a quotation to PDF, then open it on a machine that cannot reach this server | The logo is still there. Images are inlined as `data:` URIs rather than URLs, because a quotation gets emailed and a recipient resolving `localhost:4000` finds their own machine | P | Not Run |
+| DOC-071 | The refund slip shows the logo (D174) | With a logo configured, complete a return and print the slip | The logo prints above the shop name, and the name is still printed. D172 covered the sales bill and the A4 and missed this renderer — the one a customer keeps as proof the shop took the goods back | P | Not Run |
+| DOC-072 | The refund slip is unchanged without a logo (D174) | Print a refund slip on a workspace with no logo uploaded | No image element, shop name intact, every figure unchanged | N | Not Run |
+| DOC-073 | The RETURN / REFUND stamp survives the logo (D174) | Print a refund slip with a logo configured | The stamp is still the loudest thing on the page. A refund slip mistaken for a sales receipt can be presented as proof of purchase | N | Not Run |
 | DOC-001 | Sale A4 document renders | Open printable invoice for a sale | Items, totals, payments, letterhead correct | P | Not Run |
 | DOC-002 | Customer block composes address | Sale for customer with street/city/state/zip/country | One joined "Bill to" address line; company + tax no. shown | P | Not Run |
 | DOC-003 | Walk-in shows placeholder party | Sale without customer | "Walk-in customer" block | P | Not Run |
@@ -965,7 +968,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | PROD | 93 | SIMP | 8 |
 | PIMP | 18 | QB | 31 |
 | POS | 62 | SET | 36 |
-| PAY | 41 | DOC | 43 |
+| PAY | 41 | DOC | 46 |
 | DISC | 15 | RSV | 16 |
 | MARK | 20 | OTBL | 25 |
 | SALE | 33 | BSPL | 14 |
@@ -975,7 +978,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 746 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 749 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 

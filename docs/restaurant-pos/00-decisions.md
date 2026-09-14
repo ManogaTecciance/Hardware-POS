@@ -11093,6 +11093,66 @@ refunded the shirt and sold a replacement for the trousers.
 
 ---
 
+## D174 — the refund slip gets the logo too
+
+**Status:** accepted and **built**, 2026-09-14. No schema change, no migration.
+
+### What was reported
+
+> "return/refund bill also needed to contain the bussiness logo"
+
+### What D172 missed
+
+D172 put the logo on the **sales** receipt and the **A4** letterhead and stopped
+there. `return-receipt.template.ts` is a separate renderer with its own data
+shape, and it was not in the diff.
+
+That is the wrong one to have missed. A refund slip is handed to a customer who
+is already unhappy, and it is the document they keep as proof the shop took the
+goods back — the piece of paper most likely to be brought back in and argued
+over.
+
+The A4 return document was already covered, because `returnHtml` goes through
+the same `render()` boundary D172 introduced. Only the thermal slip was left.
+
+### The decision
+
+**Same field, same contract, same rules.** `logoDataUri` on
+`ReturnReceiptData`, inlined by `ReturnsService` from the **same**
+`documents.logoUrl` the bill and the letterhead read.
+
+One shop, one logo. A per-document setting is how a refund slip ends up showing
+a different mark from the bill it reverses.
+
+The logo sits **above** the shop name and does not replace it, for D172's
+reason and one of its own: a customer disputing a refund needs the slip to say
+which shop owes them the money, and a monochrome roll can turn a colour logo
+into a smear.
+
+### Mutation proof
+
+| Mutation | Fails |
+|---|---|
+| drop the `if (!d.logoDataUri) return ''` guard | "prints no image at all when no logo is configured" **and** "treats an explicit null the same as an absent logo" |
+| the logo REPLACES the shop name | "prints the logo as inlined bytes when one is configured" |
+
+The template had **no spec at all** before this. The new one also pins what the
+header must not disturb: the refund total, the return and sale numbers, the
+document type, and the `RETURN / REFUND` stamp — which is the loudest thing on
+the page deliberately, because a refund slip mistaken for a sales receipt is one
+that can be presented as proof of purchase.
+
+### Now fully covered
+
+Every server-rendered document carries its branding: the sales bill (D172), the
+A4 letterhead, invoice, quotation and return (D172), and the refund slip
+(D174). The only printable left without one is `receipt-print.ts`'s
+**client-side fallback**, recorded in D172 and still deliberate: it exists to
+get paper out of the printer when the API is unreachable, and its whole design
+is to be minimal.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |
