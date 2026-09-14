@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import { ModuleKey } from '@hardware-pos/database';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
@@ -66,6 +66,24 @@ export class PrintingController {
     @Param('agentId') agentId: string,
   ): Promise<{ ok: true }> {
     await this.agents.revoke(tenantId, agentId);
+    return { ok: true };
+  }
+
+  /**
+   * D183 — forget an agent altogether. Revoke keeps the row as a "Revoked"
+   * line forever; a replaced counter PC should not haunt the settings screen.
+   * Nothing references an agent by key (`leasedBy` on jobs and attempts is
+   * the id as plain text, kept as history), so this is a plain delete. A
+   * still-running agent gets 401 on its next heartbeat, exactly as after a
+   * revoke.
+   */
+  @Delete('agents/:agentId')
+  @RequirePermissions(Permission.KITCHEN_STATION_MANAGE)
+  async removeAgent(
+    @TenantId() tenantId: string,
+    @Param('agentId') agentId: string,
+  ): Promise<{ ok: true }> {
+    await this.agents.remove(tenantId, agentId);
     return { ok: true };
   }
 

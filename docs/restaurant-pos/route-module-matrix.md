@@ -5,8 +5,8 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 339
-- Module-guarded routes: 234
+- Total routes: 340
+- Module-guarded routes: 235
 - Ungated routes: 105
 
 ## How to read the Guard column
@@ -504,6 +504,7 @@ printer choice is not restored — D152's station decides the device.
 | POST | `/printing/agents` | KITCHEN | ENFORCED | kitchen:station:manage |
 | GET | `/printing/agents` | KITCHEN | ENFORCED | kitchen:station:manage |
 | POST | `/printing/agents/:agentId/revoke` | KITCHEN | ENFORCED | kitchen:station:manage |
+| DELETE | `/printing/agents/:agentId` | KITCHEN | ENFORCED | kitchen:station:manage |
 
 ### PrintAgentController (D181 — the on-site agent's own API)
 

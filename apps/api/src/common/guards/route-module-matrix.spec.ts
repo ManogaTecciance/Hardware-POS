@@ -426,6 +426,7 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /printing/agents': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'GET /printing/agents': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   'POST /printing/agents/:agentId/revoke': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
+  'DELETE /printing/agents/:agentId': { module: 'KITCHEN', guard: 'ENFORCED', scope: T },
   /*
    * D181 — the on-site print agent's own API. `public-no-tenant` in this
    * table's vocabulary means "not a workspace-user route": these carry

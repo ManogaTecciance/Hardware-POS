@@ -156,7 +156,14 @@ async function main(): Promise<void> {
       // Exponential backoff to 60s: a shop's uplink drops, and hammering it
       // helps nobody. The queue is server-side, so nothing is lost meanwhile.
       backoffMs = Math.min(backoffMs === 0 ? 1_000 : backoffMs * 2, 60_000);
-      log(`error: ${err instanceof Error ? err.message : String(err)} — retrying in ${backoffMs}ms`);
+      const message = err instanceof Error ? err.message : String(err);
+      // The one failure an installer can act on: a token this API does not
+      // know. Say it in words the person at the counter PC can use.
+      if (/HTTP 401/.test(message)) {
+        log(`token rejected by ${config.apiUrl} — revoked, or paired on a different API address — retrying in ${backoffMs}ms`);
+      } else {
+        log(`error: ${message} — retrying in ${backoffMs}ms`);
+      }
       await sleep(backoffMs);
     }
   }

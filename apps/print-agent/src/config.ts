@@ -31,18 +31,27 @@ const DEFAULTS = {
 
 export function loadConfig(configPath = process.env.AGENT_CONFIG ?? 'agent.json'): AgentConfig {
   let fileConfig: Partial<AgentConfig> = {};
+  let fileError: string | null = null;
   try {
-    fileConfig = JSON.parse(readFileSync(resolve(configPath), 'utf8')) as Partial<AgentConfig>;
-  } catch {
-    // Missing file is fine when everything comes from the environment —
-    // which is how a container or a systemd unit is usually configured.
+    // Strip a UTF-8 byte-order mark: Windows PowerShell's Set-Content writes
+    // one, Notepad can, and JSON.parse refuses it — which once left a fully
+    // installed agent insisting it was "not configured".
+    const raw = readFileSync(resolve(configPath), 'utf8').replace(/^\uFEFF/, '');
+    fileConfig = JSON.parse(raw) as Partial<AgentConfig>;
+  } catch (err) {
+    // A missing file is fine when everything comes from the environment —
+    // which is how a container or a systemd unit is usually configured. A
+    // file that exists but cannot be parsed is not, and must be said.
+    const code = (err as { code?: string }).code;
+    if (code !== 'ENOENT') fileError = err instanceof Error ? err.message : String(err);
   }
 
   const apiUrl = process.env.AGENT_API_URL ?? fileConfig.apiUrl ?? '';
   const token = process.env.AGENT_TOKEN ?? fileConfig.token ?? '';
   if (!apiUrl || !token) {
     throw new Error(
-      'Print agent is not configured. Provide apiUrl and token in agent.json, or set ' +
+      (fileError ? `Could not read ${resolve(configPath)}: ${fileError}. ` : '') +
+        'Print agent is not configured. Provide apiUrl and token in agent.json, or set ' +
         'AGENT_API_URL and AGENT_TOKEN. Pair an agent in Settings → Printing to get a token.',
     );
   }

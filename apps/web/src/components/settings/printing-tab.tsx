@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
+import { api } from '@/lib/api';
 import { kitchenPrinters, kitchenStations, printing } from '@/lib/restaurant/api';
 import type {
   KitchenPrinterKind,
@@ -45,6 +46,9 @@ import type {
  * done. The branch-config fields remain on the API for the rare shop that
  * needs to turn auto-printing off or pin a default.
  */
+/** How often the tab re-reads agent liveness on its own (the API marks an agent offline after 120 s). */
+export const AGENT_POLL_MS = 5_000;
+
 export function PrintingTab({ session, branchId }: { session: Session; branchId: string }) {
   const { hasPermission } = useAuth();
   const canManage = hasPermission(Permission.KITCHEN_STATION_MANAGE);
@@ -84,6 +88,25 @@ export function PrintingTab({ session, branchId }: { session: Session; branchId:
       cancelled = true;
     };
   }, [reload]);
+
+  /*
+   * D183 — the agent's Online badge and the queue counts change on their own
+   * (an installer just ran on the counter PC; a ticket just printed), and the
+   * person watching this tab is exactly the one who needs to see it without
+   * pressing anything. Two cheap reads on a timer; paused while the tab is
+   * hidden so a forgotten browser does not poll all night.
+   */
+  React.useEffect(() => {
+    if (status !== 'ready') return;
+    let ticks = 0;
+    const timer = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      ticks += 1;
+      printing.agents(session, branchId).then(setAgents).catch(() => {});
+      if (ticks % 3 === 0) printing.queue(session, branchId).then(setQueue).catch(() => {});
+    }, AGENT_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [status, session, branchId]);
 
   if (status === 'loading') {
     return (
@@ -1193,6 +1216,36 @@ function PrinterRow({
 
 // ── Agents ──────────────────────────────────────────────────────────────────
 
+/**
+ * D183 — the API address the agent must be told. It is this app's own API
+ * base without the version prefix, because that is the one thing a person
+ * at the counter PC cannot know and the installer must ask for: a token is
+ * only valid on the API it was paired on (the first customer install pointed
+ * at the cloud address while the token lived on a LAN dev API).
+ */
+export function agentApiUrl(): string {
+  return api.baseUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '');
+}
+
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = React.useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* the text is on screen; the operator can select it */
+    }
+  };
+  return (
+    <Button variant="outline" size="sm" onClick={() => void copy()} aria-label={label}>
+      {copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
+      {copied ? 'Copied' : 'Copy'}
+    </Button>
+  );
+}
+
 function AgentsCard({
   session,
   branchId,
@@ -1210,8 +1263,8 @@ function AgentsCard({
   const [name, setName] = React.useState('');
   const [pairing, setPairing] = React.useState(false);
   const [token, setToken] = React.useState<{ name: string; token: string } | null>(null);
-  const [copied, setCopied] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const apiUrl = agentApiUrl();
 
   const pair = async () => {
     if (pairing || !name.trim()) return;
@@ -1242,16 +1295,27 @@ function AgentsCard({
     await onChange();
   };
 
-  const copy = async () => {
-    if (!token) return;
-    try {
-      await navigator.clipboard.writeText(token.token);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* the token is on screen; the operator can select it */
-    }
+  // D183 — a revoked agent used to sit in this list forever.
+  const remove = async (agent: PrintAgentView) => {
+    const ok = await confirm({
+      title: `Remove ${agent.name}?`,
+      message: agent.isActive
+        ? 'It disappears from this list and stops printing at its next check-in. Nothing queued is lost. This cannot be undone.'
+        : 'It disappears from this list. This cannot be undone.',
+      confirmLabel: 'Remove agent',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    await printing.removeAgent(session, agent.id);
+    await onChange();
   };
+
+  const installCommand = token
+    ? `install.cmd -ApiUrl "${apiUrl}" -Token "${token.token}" -Name "${token.name}"`
+    : '';
+  const agentJson = token
+    ? JSON.stringify({ apiUrl, token: token.token, name: token.name }, null, 2)
+    : '';
 
   return (
     <Card>
@@ -1274,7 +1338,7 @@ function AgentsCard({
             key={a.id}
             className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border p-3"
           >
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="font-medium">{a.name}</span>
                 {!a.isActive ? (
@@ -1290,35 +1354,79 @@ function AgentsCard({
                 )}
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                {a.lastSeenAt
-                  ? `Last seen ${new Date(a.lastSeenAt).toLocaleString()}`
-                  : 'Never checked in'}
+                {a.lastSeenAt ? `Last seen ${relativeTime(a.lastSeenAt)}` : 'Never checked in'}
                 {a.version ? ` · v${a.version}` : ''}
               </p>
+              {a.isActive && !a.lastSeenAt ? (
+                <p className="mt-0.5 text-xs text-warning">
+                  Not installed yet, or installed with a different API address than{' '}
+                  <code className="font-mono">{apiUrl}</code>.
+                </p>
+              ) : null}
             </div>
-            {canManage && a.isActive ? (
-              <Button variant="ghost" size="sm" onClick={() => void revoke(a)}>
-                Revoke
-              </Button>
-            ) : null}
+            <div className="flex items-center gap-2">
+              {canManage && a.isActive ? (
+                <Button variant="ghost" size="sm" onClick={() => void revoke(a)}>
+                  Revoke
+                </Button>
+              ) : null}
+              {canManage ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-danger hover:text-danger"
+                  onClick={() => void remove(a)}
+                  aria-label={`Remove agent ${a.name}`}
+                >
+                  Remove
+                </Button>
+              ) : null}
+            </div>
           </div>
         ))}
 
         {token ? (
-          <div className="space-y-2 rounded-lg border border-warning-rule bg-warning-soft p-3 text-sm">
-            <p className="font-medium">Token for “{token.name}” — shown once</p>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 truncate rounded bg-card px-2 py-1 font-mono text-xs">
-                {token.token}
-              </code>
-              <Button variant="outline" size="sm" onClick={() => void copy()}>
-                {copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
-                {copied ? 'Copied' : 'Copy'}
-              </Button>
+          <div
+            className="space-y-3 rounded-lg border border-warning-rule bg-warning-soft p-3 text-sm"
+            data-testid="pairing-box"
+          >
+            <p className="font-medium">“{token.name}” is paired — the token is shown once</p>
+
+            <div>
+              <p className="text-xs font-medium">1. API address — the installer asks for this</p>
+              <div className="mt-1 flex items-center gap-2">
+                <code className="flex-1 truncate rounded bg-card px-2 py-1 font-mono text-xs">{apiUrl}</code>
+                <CopyButton text={apiUrl} label="Copy API address" />
+              </div>
             </div>
+
+            <div>
+              <p className="text-xs font-medium">2. Token — then this</p>
+              <div className="mt-1 flex items-center gap-2">
+                <code className="flex-1 truncate rounded bg-card px-2 py-1 font-mono text-xs">{token.token}</code>
+                <CopyButton text={token.token} label="Copy token" />
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-medium">Or one command, in the unzipped agent folder on that PC</p>
+              <div className="mt-1 flex items-center gap-2">
+                <code className="flex-1 truncate rounded bg-card px-2 py-1 font-mono text-xs">{installCommand}</code>
+                <CopyButton text={installCommand} label="Copy install command" />
+              </div>
+            </div>
+
+            <details className="text-xs">
+              <summary className="cursor-pointer text-muted-foreground">agent.json, for a manual install</summary>
+              <div className="mt-1 flex items-start gap-2">
+                <pre className="flex-1 overflow-x-auto rounded bg-card px-2 py-1 font-mono text-xs">{agentJson}</pre>
+                <CopyButton text={agentJson} label="Copy agent.json" />
+              </div>
+            </details>
+
             <p className="text-xs text-muted-foreground">
-              Paste it into the agent’s <code>agent.json</code> on the restaurant PC. It is not
-              stored here and cannot be shown again — pair a new agent if it is lost.
+              The token is not stored here and cannot be shown again — pair a new agent if it is
+              lost. This card updates by itself when the agent checks in.
             </p>
             <Button variant="ghost" size="sm" onClick={() => setToken(null)}>
               Done

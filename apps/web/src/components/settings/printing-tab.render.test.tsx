@@ -21,7 +21,7 @@ import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ConfirmProvider } from '@/components/ui/confirm';
-import { PrintingTab } from './printing-tab';
+import { AGENT_POLL_MS, PrintingTab, agentApiUrl } from './printing-tab';
 import { kitchenPrinters, kitchenStations, printing } from '@/lib/restaurant/api';
 import type {
   KitchenPrinterView,
@@ -47,6 +47,7 @@ vi.mock('@/lib/restaurant/api', () => ({
     retryJob: vi.fn(),
     pairAgent: vi.fn(),
     revokeAgent: vi.fn(),
+    removeAgent: vi.fn(),
     discover: vi.fn(),
   },
 }));
@@ -117,6 +118,8 @@ const mock = {
   agents: vi.mocked(printing.agents),
   queue: vi.mocked(printing.queue),
   discover: vi.mocked(printing.discover),
+  pairAgent: vi.mocked(printing.pairAgent),
+  removeAgent: vi.mocked(printing.removeAgent),
 };
 
 async function open(opts: { printers?: KitchenPrinterView[]; discovery?: PrinterDiscoveryView; agents?: PrintAgentView[] } = {}) {
@@ -307,6 +310,58 @@ describe('PrintingTab — adding a printer from what the agent found', () => {
     const add = screen.getAllByRole('button', { name: 'Add printer' }).at(-1) as HTMLButtonElement;
     expect(add.disabled).toBe(true);
     expect(mock.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('PrintingTab — the print agent', () => {
+  it('pairing shows the API address the installer must be given, the token, and one command', async () => {
+    await open();
+    mock.pairAgent.mockResolvedValue({ id: 'agt_new', name: 'Counter PC', token: 'pat_abc123' });
+    fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Counter PC' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Pair agent' }));
+    const box = await screen.findByTestId('pairing-box');
+    const url = agentApiUrl();
+    // The app's own API base, without /v1 — what the first customer install got wrong.
+    expect(url).toMatch(/^https?:\/\//);
+    expect(url).not.toMatch(/\/v1\/?$/);
+    expect(box.textContent).toContain(url);
+    expect(box.textContent).toContain('pat_abc123');
+    expect(box.textContent).toContain(`install.cmd -ApiUrl "${url}" -Token "pat_abc123" -Name "Counter PC"`);
+    expect(mock.pairAgent).toHaveBeenCalledWith(session, BRANCH, 'Counter PC');
+  });
+
+  it('an agent that never checked in says so, with the address it must use', async () => {
+    await open({ agents: [{ ...AGENT_ONLINE, online: false, lastSeenAt: null, version: null }] });
+    expect(screen.getByText('Never checked in')).toBeTruthy();
+    expect(screen.getByText(/different API address than/).textContent).toContain(agentApiUrl());
+  });
+
+  it('Remove asks, then deletes the agent and reloads — for a revoked one too', async () => {
+    await open({ agents: [{ ...AGENT_ONLINE, isActive: false, online: false }] });
+    mock.removeAgent.mockResolvedValue({ ok: true });
+    expect(screen.getByText('Revoked')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove agent Counter PC' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(mock.removeAgent).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove agent' }));
+    await waitFor(() => expect(mock.removeAgent).toHaveBeenCalledWith(session, 'agt_1'));
+    await waitFor(() => expect(mock.agents).toHaveBeenCalledTimes(2));
+  });
+
+  it('the Online badge appears by itself once the agent checks in — no reload', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await open({ agents: [{ ...AGENT_ONLINE, online: false, lastSeenAt: null }] });
+      expect(screen.getByText('Offline')).toBeTruthy();
+      mock.agents.mockResolvedValue([AGENT_ONLINE]);
+      await vi.advanceTimersByTimeAsync(AGENT_POLL_MS + 50);
+      await waitFor(() => expect(screen.getByText('Online')).toBeTruthy());
+      expect(mock.agents.mock.calls.length).toBeGreaterThanOrEqual(2);
+      // Only the agents (and, every third tick, the queue) are re-read — not the printers.
+      expect(mock.list).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

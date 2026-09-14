@@ -135,6 +135,16 @@ export class PrintAgentService {
     });
   }
 
+  /** D183 — delete the row; see the controller for why that is safe. */
+  async remove(tenantId: string, agentId: string): Promise<void> {
+    const agent = await this.prisma.printAgent.findFirst({
+      where: { id: agentId, tenantId },
+      select: { id: true },
+    });
+    if (!agent) throw new NotFoundException('Print agent not found');
+    await this.prisma.printAgent.delete({ where: { id: agent.id } });
+  }
+
   /** Is this branch served by a live agent? Decides who drains the queue. */
   async branchHasLiveAgent(branchId: string): Promise<boolean> {
     const agent = await this.prisma.printAgent.findFirst({
