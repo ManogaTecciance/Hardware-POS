@@ -202,6 +202,12 @@ export interface SessionDetailView {
       items: {
         id: string;
         menuItemId: string;
+        /**
+         * D198 — the Product behind the line, so the till can count what the
+         * table already holds against a buy-X-get-Y offer. Null on a legacy
+         * MENU_ITEM line, which no promotion can name.
+         */
+        productId: string | null;
         menuItemName: string;
         /** D71 — "Medium" vs "Large" is what a guest is being charged for. */
         variantName: string | null;
@@ -733,6 +739,7 @@ export class TableSessionsService {
           items: round.items.map((item) => ({
             id: item.id,
             menuItemId: item.menuItemId,
+            productId: item.productId ?? null,
             menuItemName: item.menuItemName,
             variantName: item.variantNameSnapshot,
             unitPrice: item.unitPrice.toFixed(2),

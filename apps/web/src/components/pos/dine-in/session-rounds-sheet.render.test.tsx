@@ -181,7 +181,12 @@ describe('the order so far (D155)', () => {
     await settle();
 
     // Two, not three: the DRAFT round is excluded here exactly as it is above.
-    await waitFor(() => expect(onLoaded).toHaveBeenCalledWith(2));
+    // D198 — the detail rides along, so the workspace can judge offers over
+    // what the table holds (an intentional widening of the contract, not a
+    // refactor; the count is asserted exactly as before).
+    await waitFor(() =>
+      expect(onLoaded).toHaveBeenCalledWith(2, expect.objectContaining({ orders: expect.any(Array) })),
+    );
   });
 
   it('offers Void on a live line, and never on one already voided', async () => {

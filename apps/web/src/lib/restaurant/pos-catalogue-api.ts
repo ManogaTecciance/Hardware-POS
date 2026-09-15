@@ -132,6 +132,11 @@ export interface PosCatalogueResponse {
 export interface PosCatalogueQuery {
   branchId: string;
   channel?: PosCatalogueChannel;
+  /**
+   * D198 — only these products. How the till fetches a buy-X-get-Y reward it
+   * has not paged to yet, through the same read model as everything it sells.
+   */
+  productId?: string[];
   foodType?: PosCatalogueFoodType;
   /** Server-side match over name, dietary tags and subcategory name. */
   search?: string;
@@ -273,6 +278,9 @@ export async function fetchPosCatalogue(
 ): Promise<PosCatalogueResponse> {
   const params: string[] = [`branchId=${encodeURIComponent(query.branchId)}`];
   if (query.channel) params.push(`channel=${encodeURIComponent(query.channel)}`);
+  // Repeated, not comma-joined — a repeated param is what the server's id-list
+  // transform reads (the same shape as the kitchen history filters).
+  for (const id of query.productId ?? []) params.push(`productId=${encodeURIComponent(id)}`);
   if (query.foodType) params.push(`foodType=${encodeURIComponent(query.foodType)}`);
   if (query.search) params.push(`search=${encodeURIComponent(query.search)}`);
   if (query.limit != null) params.push(`limit=${query.limit}`);

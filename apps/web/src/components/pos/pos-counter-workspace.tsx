@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
 
-import { applyPromotions, type PromotionRule } from '@hardware-pos/shared';
+import { applyPromotions, type PromotionCartLine, type PromotionRule } from '@hardware-pos/shared';
 
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
@@ -16,11 +16,18 @@ import { ApiError } from '@/lib/api';
 import { useAuth, type Session } from '@/lib/auth';
 import { discountLimitFor, withinDiscountLimit, Permission } from '@/lib/permissions';
 import { useEffectiveProfile } from '@/lib/platform-profile';
+import {
+  pendingOffers,
+  sentLinesForOffers,
+  type OfferDeclineKey,
+  type PendingOffer,
+} from '@/lib/pos/offer-prompts';
 import { setProductAvailability } from '@/lib/products-api';
 import { resolveLinkedSession } from '@/lib/restaurant/active-session';
 import { restaurantConfig, tableSessions, takeaway } from '@/lib/restaurant/api';
 import { formatMoney } from '@/lib/restaurant/labels';
-import type { MenuItemView } from '@/lib/restaurant/types';
+import { fetchPosCatalogue } from '@/lib/restaurant/pos-catalogue-api';
+import type { MenuItemView, ModifierGroupView, SessionDetail } from '@/lib/restaurant/types';
 
 import { CustomerCapturePopup, type ChosenCustomer } from './counter/customer-capture-popup';
 import { BillDialog } from '@/components/restaurant/billing/bill-dialog';
@@ -29,6 +36,7 @@ import { SessionRoundsSheet, flattenSubmittedRounds } from './dine-in/session-ro
 import { TableBillSheet } from './dine-in/table-bill-sheet';
 import { TableSessionPanel, type ActiveTableSession } from './dine-in/table-session-panel';
 import { ItemDiscountDialog, type LineDiscount } from './counter/item-discount-dialog';
+import { OfferPromptCard, type OfferRewardInfo } from './counter/offer-prompt-card';
 import { OrderCompletionScreen, type CompletionSummary } from './counter/order-completion-screen';
 import { PaymentPopup } from './counter/payment-popup';
 import { RunningBillSummary } from './counter/running-bill-summary';
@@ -47,13 +55,44 @@ import type { DraftLine } from './pos-types';
 import { addDraftLine, cryptoRandomKey, draftSubtotal } from './pos-utils';
 import { normalizeSearchTerm } from '@/lib/search-term';
 
-import { useMenuData, usePosCatalogue } from './use-menu-data';
+import { catalogueToMenuData, useMenuData, usePosCatalogue } from './use-menu-data';
 
 /**
  * Stable empty reference — a fresh `[]` per render would invalidate the
  * promotion `useMemo` on every keystroke in the cart.
  */
 const EMPTY_PROMOTION_RULES: PromotionRule[] = [];
+
+/**
+ * D198 — where a table's "customer declined" answers live between rounds.
+ *
+ * Per table session and per DEVICE (sessionStorage, the same home as the
+ * floor's D112 ready-acks): a table is open for an hour across several rounds
+ * and the waiter must not be asked the same question on every one, while a
+ * counter order lives and dies in this component and needs no store at all.
+ * Another device picking up the table asks once more — accepted for now; the
+ * alternative is a column on the order, which can follow if it grates.
+ */
+const OFFER_DECLINE_KEY_PREFIX = 'hpos.pos.offerDeclines.';
+
+function readDeclinedOffers(sessionId: string): Set<OfferDeclineKey> {
+  try {
+    const raw = window.sessionStorage.getItem(OFFER_DECLINE_KEY_PREFIX + sessionId);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((v) => typeof v === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeDeclinedOffers(sessionId: string, keys: Set<OfferDeclineKey>): void {
+  try {
+    window.sessionStorage.setItem(OFFER_DECLINE_KEY_PREFIX + sessionId, JSON.stringify([...keys]));
+  } catch {
+    // Storage refused (private mode, quota): the answer still holds for this
+    // mount, which is the part that matters while the waiter is at the table.
+  }
+}
 
 interface Props {
   session: Session;
@@ -176,6 +215,27 @@ export function PosCounterWorkspace({
   // ── D69: dine-in session state ─────────────────────────────────────────
   const [tableSession, setTableSession] = React.useState<ActiveTableSession | null>(null);
   const [roundsSent, setRoundsSent] = React.useState(0);
+  /**
+   * D198 — what the table already has, kept (not just counted) so an offer
+   * is judged over the WHOLE table: tea in round one and salad in round two
+   * is a complete offer, and a prompt that only read the round being typed
+   * would ask for a second salad.
+   */
+  const [sessionDetail, setSessionDetail] = React.useState<SessionDetail | null>(null);
+  /** D198 — the asks this order has answered "customer declined" to. */
+  const [declinedOffers, setDeclinedOffers] = React.useState<Set<OfferDeclineKey>>(
+    () => new Set(),
+  );
+  /**
+   * D198 — reward products fetched by id because the loaded catalogue page
+   * did not carry them, with their modifier groups (the customise dialog reads
+   * groups from the catalogue, and a product outside it brings its own).
+   * `null` records a lookup that found nothing, so it is not retried on every
+   * render.
+   */
+  const [rewardItems, setRewardItems] = React.useState<
+    Map<string, { item: MenuItemView; groupsById: Map<string, ModifierGroupView> } | null>
+  >(() => new Map());
   const [sending, setSending] = React.useState(false);
   const [dineInError, setDineInError] = React.useState<string | null>(null);
   /** D71 — the bill sheet: review, split, close. */
@@ -268,19 +328,39 @@ export function PosCounterWorkspace({
    * and the rounds sheet corrects it from the same endpoint.
    */
   const activeSessionId = tableSession?.id ?? null;
+  /*
+   * D198 — bumped to re-read the table after a round is sent, so the offer
+   * prompt counts what just went to the kitchen. The rounds sheet's own reads
+   * feed the same state through `onLoaded`.
+   */
+  const [detailTick, setDetailTick] = React.useState(0);
   React.useEffect(() => {
-    if (!activeSessionId) return;
+    if (!activeSessionId) {
+      setSessionDetail(null);
+      return;
+    }
     let cancelled = false;
     void tableSessions
       .getDetail(session, activeSessionId)
       .then((detail) => {
-        if (!cancelled) setRoundsSent(flattenSubmittedRounds(detail).length);
+        if (cancelled) return;
+        setRoundsSent(flattenSubmittedRounds(detail).length);
+        setSessionDetail(detail);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [activeSessionId, session]);
+  }, [activeSessionId, session, detailTick]);
+
+  /*
+   * D198 — a table's declines outlive the cart: read when the table is picked,
+   * written on every answer. A counter order starts with none and is reset
+   * with the cart (see `newOrder` / `resetMode`).
+   */
+  React.useEffect(() => {
+    setDeclinedOffers(activeSessionId ? readDeclinedOffers(activeSessionId) : new Set());
+  }, [activeSessionId]);
 
   // D45: Restaurant / Cafe / Bakery tenants read the new POS catalogue
   // endpoint (Products the wizard published as POS-sellable). Retail
@@ -327,6 +407,8 @@ export function PosCounterWorkspace({
     item: MenuItemView;
     /** Present when re-opening the dialog for an existing cart line. */
     editingKey?: string;
+    /** D198 — a reward fetched outside the catalogue brings its own groups. */
+    groupsById?: Map<string, ModifierGroupView>;
   } | null>(null);
   const [discountTargetKey, setDiscountTargetKey] = React.useState<string | null>(null);
 
@@ -385,14 +467,14 @@ export function PosCounterWorkspace({
     });
   };
 
-  const openItem = (item: MenuItemView) => {
+  const openItem = (item: MenuItemView, groupsById?: Map<string, ModifierGroupView>) => {
     // D46 — variants force the Customise dialog too. Even with zero
     // modifier groups a Product with variants must let the operator pick
     // the size, so the fast-add short-circuit only applies when BOTH
     // lists are empty.
     const hasVariants = (item.variants ?? []).length > 0;
     if (item.modifierGroupIds.length > 0 || hasVariants) {
-      setModifierTarget({ item });
+      setModifierTarget(groupsById ? { item, groupsById } : { item });
       return;
     }
     // No modifiers, no variants → straight into the cart. Source
@@ -469,25 +551,113 @@ export function PosCounterWorkspace({
    * same evaluation the settle performs, over the same rules the server sent.
    */
   const promotionRules = mode === 'DINE_IN' ? EMPTY_PROMOTION_RULES : catalogue.promotionRules;
-  const promotion = React.useMemo(
+  /** The draft as the applier reads it — one mapping for the money AND the prompt. */
+  const draftPromotionLines = React.useMemo<PromotionCartLine[]>(
     () =>
-      applyPromotions({
-        lines: draft.map((line) => ({
-          id: line.key,
-          // A legacy MENU_ITEM line has no Product behind it, so no promotion
-          // can name it. The empty string matches nothing.
-          productId: line.productId ?? '',
-          unitPrice: lineUnitWithModifiers(line),
-          quantity: line.quantity,
-          lineSubtotal: round2(line.quantity * lineUnitWithModifiers(line)),
-          // Manual wins: a discounted line is invisible to promotions (D123),
-          // and the server applies the same rule.
-          manualDiscountAmount: discountAmount(line),
-        })),
-        promotions: promotionRules,
-      }),
-    [draft, promotionRules],
+      draft.map((line) => ({
+        id: line.key,
+        // A legacy MENU_ITEM line has no Product behind it, so no promotion
+        // can name it. The empty string matches nothing.
+        productId: line.productId ?? '',
+        unitPrice: lineUnitWithModifiers(line),
+        quantity: line.quantity,
+        lineSubtotal: round2(line.quantity * lineUnitWithModifiers(line)),
+        // Manual wins: a discounted line is invisible to promotions (D123),
+        // and the server applies the same rule.
+        manualDiscountAmount: discountAmount(line),
+      })),
+    [draft],
   );
+  const promotion = React.useMemo(
+    () => applyPromotions({ lines: draftPromotionLines, promotions: promotionRules }),
+    [draftPromotionLines, promotionRules],
+  );
+
+  /*
+   * D198 — the buy-X-get-Y offers this order has qualified for and not yet
+   * answered. NOT the money: that is `promotion` above (and, for dine-in, the
+   * server's bill). This is the question the operator has to put to the
+   * guest, and it is asked in every mode, dine-in included — over the table's
+   * sent rounds plus the draft, so tea in round one still earns its salad in
+   * round two. The rules are the catalogue's for this channel, unnarrowed:
+   * the DINE_IN exclusion above is about a per-round FIGURE contradicting the
+   * bill, and a prompt states no figure.
+   */
+  const isDineInMode = mode === 'DINE_IN';
+  const offers = React.useMemo(
+    () =>
+      pendingOffers({
+        lines: isDineInMode
+          ? [...sentLinesForOffers(sessionDetail), ...draftPromotionLines]
+          : draftPromotionLines,
+        promotions: catalogue.promotionRules,
+        declined: declinedOffers,
+      }),
+    [isDineInMode, sessionDetail, draftPromotionLines, catalogue.promotionRules, declinedOffers],
+  );
+
+  /*
+   * D198 — the product each offer names: from the loaded catalogue when it is
+   * there, else fetched once by id through the same read model. A name the
+   * card can show and an item Add can put in the cart are the same lookup.
+   */
+  const rewardOf = React.useCallback(
+    (productId: string): OfferRewardInfo => {
+      const item = findMenuItem(menuData, productId) ?? rewardItems.get(productId)?.item ?? null;
+      return { name: item?.name ?? null, soldOut: item?.stockState === 'SOLD_OUT' };
+    },
+    [menuData, rewardItems],
+  );
+  React.useEffect(() => {
+    if (!branchId) return;
+    const missing = offers
+      .map((o) => o.productId)
+      .filter((id, i, all) => all.indexOf(id) === i)
+      .filter((id) => !findMenuItem(menuData, id) && !rewardItems.has(id));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    void fetchPosCatalogue(session, {
+      branchId,
+      channel: catalogueChannel,
+      productId: missing,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        const data = catalogueToMenuData(res.items);
+        setRewardItems((prev) => {
+          const next = new Map(prev);
+          for (const id of missing) {
+            const item = findMenuItem(data, id);
+            next.set(id, item ? { item, groupsById: data.modifierGroupsById } : null);
+          }
+          return next;
+        });
+      })
+      .catch(() => {
+        // Left unresolved: the card keeps "this item" and Add stays disarmed;
+        // the next render with a new offer retries.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [offers, menuData, rewardItems, branchId, catalogueChannel, session]);
+
+  const addReward = (offer: PendingOffer) => {
+    const fromCatalogue = findMenuItem(menuData, offer.productId);
+    if (fromCatalogue) {
+      openItem(fromCatalogue);
+      return;
+    }
+    const fetched = rewardItems.get(offer.productId);
+    if (fetched) openItem(fetched.item, fetched.groupsById);
+  };
+  const declineOffer = (offer: PendingOffer) => {
+    setDeclinedOffers((prev) => {
+      const next = new Set(prev).add(offer.declineKey);
+      if (activeSessionId) writeDeclinedOffers(activeSessionId, next);
+      return next;
+    });
+  };
   const promotionDiscount = round2(
     promotion.totalDiscount + (promotion.orderPromotion?.discountAmount ?? 0),
   );
@@ -566,6 +736,8 @@ export function PosCounterWorkspace({
       });
       setDraft([]);
       setRoundsSent((n) => n + 1);
+      // D198 — re-read the table so the offer prompt counts this round.
+      setDetailTick((t) => t + 1);
       // A fresh key per round: the same one twice would make the second
       // round a replay of the first and silently drop it.
       setIdempotencyKey(cryptoRandomKey());
@@ -599,6 +771,8 @@ export function PosCounterWorkspace({
 
   const newOrder = () => {
     setDraft([]);
+    // D198 — a new order has answered nothing yet.
+    setDeclinedOffers(new Set());
     setCustomer(null);
     setCompletion(null);
     setStage('compose');
@@ -623,6 +797,7 @@ export function PosCounterWorkspace({
       }
       setDraft([]);
     }
+    setDeclinedOffers(new Set());
     setTableSession(null);
     setRoundsSent(0);
     setClosedBill(null);
@@ -640,7 +815,15 @@ export function PosCounterWorkspace({
    */
   const isDineIn = mode === 'DINE_IN';
   const placeOrder = isDineIn ? () => void sendRound() : openCustomer;
-  const canPlace = isDineIn ? canSendToKitchen && tableSession !== null : canPlaceTakeaway;
+  /*
+   * D198 — an unanswered offer holds the order. A workflow gate on the till,
+   * not a money rule (the server prices whatever it is sent): the guest must
+   * be OFFERED the free item, and "Customer declined" is a valid answer that
+   * opens the gate without adding anything.
+   */
+  const awaitingOffer = offers.length > 0;
+  const canPlace =
+    (isDineIn ? canSendToKitchen && tableSession !== null : canPlaceTakeaway) && !awaitingOffer;
   /*
    * D155 — bound to one table for this visit.
    *
@@ -860,6 +1043,10 @@ export function PosCounterWorkspace({
             onRemove={remove}
             onClearAll={clearAll}
             canDiscount={canDiscount}
+            offers={offers}
+            rewardOf={rewardOf}
+            onAddReward={addReward}
+            onDeclineOffer={declineOffer}
             mode={mode}
             subtotal={subtotal}
             itemDiscount={totalItemDiscount}
@@ -874,6 +1061,7 @@ export function PosCounterWorkspace({
             canPlace={canPlace}
             sending={sending}
             awaitingTable={isDineIn && tableSession === null}
+            awaitingOffer={awaitingOffer}
           />
         </aside>
       </div>
@@ -928,6 +1116,7 @@ export function PosCounterWorkspace({
             onPlaceOrder={placeOrder}
             sending={sending}
             awaitingTable={isDineIn && tableSession === null}
+            awaitingOffer={awaitingOffer}
             fullWidth
           />
         }
@@ -940,6 +1129,11 @@ export function PosCounterWorkspace({
           onRemove={remove}
           onClearAll={clearAll}
           canDiscount={canDiscount}
+          offers={offers}
+          rewardOf={rewardOf}
+          onAddReward={addReward}
+          onDeclineOffer={declineOffer}
+          mode={mode}
           subtotal={subtotal}
           itemDiscount={totalItemDiscount}
           promotionDiscount={promotionDiscount}
@@ -962,7 +1156,11 @@ export function PosCounterWorkspace({
           tableLabel={tableSession.tableLabel}
           canVoid={canVoidSent}
           onClose={() => setRoundsOpen(false)}
-          onLoaded={setRoundsSent}
+          onLoaded={(count, detail) => {
+            setRoundsSent(count);
+            // D198 — a void in the sheet changes what the table holds.
+            setSessionDetail(detail);
+          }}
         />
       ) : null}
 
@@ -1017,7 +1215,7 @@ export function PosCounterWorkspace({
       {modifierTarget ? (
         <ModifierPickerDialog
           item={modifierTarget.item}
-          groupsById={menuData.modifierGroupsById}
+          groupsById={modifierTarget.groupsById ?? menuData.modifierGroupsById}
           initialLine={
             modifierTarget.editingKey
               ? draft.find((r) => r.key === modifierTarget.editingKey) ?? null
@@ -1098,6 +1296,12 @@ interface CartRailBodyProps {
   onRemove: (key: string) => void;
   onClearAll: () => void;
   canDiscount: boolean;
+  /** D198 — the buy-X-get-Y asks the operator still has to answer. */
+  offers: readonly PendingOffer[];
+  rewardOf: (productId: string) => OfferRewardInfo;
+  onAddReward: (offer: PendingOffer) => void;
+  onDeclineOffer: (offer: PendingOffer) => void;
+  mode: PosMode;
   subtotal: number;
   itemDiscount: number;
   promotionDiscount: number;
@@ -1110,17 +1314,18 @@ interface CartRailBodyProps {
 }
 
 interface CartCardProps extends CartRailBodyProps {
-  mode: PosMode;
   onPlaceOrder: () => void;
   canPlace: boolean;
   sending: boolean;
   awaitingTable: boolean;
+  awaitingOffer: boolean;
 }
 
 function CartCard(props: CartCardProps) {
   const {
-    mode, total, onPlaceOrder, canPlace, sending, awaitingTable, ...body
+    total, onPlaceOrder, canPlace, sending, awaitingTable, awaitingOffer, ...body
   } = props;
+  const { mode } = body;
 
   return (
     <div className="flex max-h-[calc(100vh-9rem)] flex-col rounded-xl border border-border bg-surface shadow-sm">
@@ -1130,6 +1335,7 @@ function CartCard(props: CartCardProps) {
           canPlace={canPlace}
           sending={sending}
           awaitingTable={awaitingTable}
+          awaitingOffer={awaitingOffer}
           disabled={body.draft.length === 0}
           total={total}
           mode={mode}
@@ -1144,7 +1350,8 @@ function CartCard(props: CartCardProps) {
 function CartBody(props: CartRailBodyProps) {
   const {
     draft, onEdit, onDiscount, onChangeQty, onRemove, onClearAll,
-    canDiscount, subtotal, itemDiscount, promotionDiscount, promotionName, serviceCharge, taxAmount,
+    canDiscount, offers, rewardOf, onAddReward, onDeclineOffer, mode,
+    subtotal, itemDiscount, promotionDiscount, promotionName, serviceCharge, taxAmount,
     servicePct, taxPct, total,
   } = props;
 
@@ -1197,6 +1404,19 @@ function CartBody(props: CartRailBodyProps) {
         )}
       </div>
 
+      {/* D198 — between the lines and the money, where the retail till puts
+          its D171 notice: the question is about the lines, and its answer
+          changes the money below. Rendered in both cart homes because the
+          body is; a card in one home only would let the Sheet place an order
+          the aside would have held. */}
+      <OfferPromptCard
+        offers={offers}
+        rewardOf={rewardOf}
+        onAdd={onAddReward}
+        onDecline={onDeclineOffer}
+        waitingAction={mode === 'DINE_IN' ? 'Confirm & send' : 'Place Order'}
+      />
+
       <RunningBillSummary
         itemCount={draft.reduce((s, r) => s + r.quantity, 0)}
         subtotal={subtotal}
@@ -1221,6 +1441,7 @@ function CartPlaceOrderFooter({
   onPlaceOrder,
   sending,
   awaitingTable,
+  awaitingOffer,
   fullWidth,
 }: {
   canPlace: boolean;
@@ -1230,6 +1451,8 @@ function CartPlaceOrderFooter({
   onPlaceOrder: () => void;
   sending: boolean;
   awaitingTable: boolean;
+  /** D198 — held by an unanswered offer, which the card above explains. */
+  awaitingOffer: boolean;
   fullWidth?: boolean;
 }) {
   const isDineIn = mode === 'DINE_IN';
@@ -1253,6 +1476,13 @@ function CartPlaceOrderFooter({
         <p className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
           <AlertTriangle className="h-3.5 w-3.5" />
           Pick a table above before sending this order.
+        </p>
+      ) : awaitingOffer ? (
+        // D198 — say WHICH gate is closed: the role line below would tell a
+        // waiter who can send that they cannot.
+        <p className="mt-2 flex items-center gap-1 text-xs text-primary">
+          <span aria-hidden>🎁</span>
+          Answer the offer above to continue.
         </p>
       ) : !canPlace ? (
         <p className="mt-2 flex items-center gap-1 text-xs text-warning">

@@ -7695,6 +7695,119 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D198 — the restaurant till OFFERS a buy-X-get-Y reward, and the guest may decline
+
+**Status:** accepted and **built**, 2026-09-15. Restaurant POS only (counter,
+takeaway, delivery, dine-in). One additive API field and one additive query
+filter; no schema change, no migration. Retail keeps D171 unchanged.
+
+### What was asked
+
+> "i think promotion Plain Tea Buy 1 / Garden Salad Get free 1 i added this as
+> promotion but when place order now i need to select plain tea and then select
+> garden salad to see the promotion in pos / is that the correct behaviour?"
+
+Then, on being offered parity with retail's D171 block: *"client they may not
+want but for the place order it need to add? what is best industry standard"*
+— and, choosing: *"no i'm only doing restaurant edits. do c"*, where C was the
+prompt that must be answered.
+
+### What was actually happening
+
+Nothing was mispriced. The counter has priced the cart through the shared
+applier since D138, so tea + salad in the basket made the salad free. What the
+restaurant till never had was D171's notice: adding the tea showed NOTHING,
+and the salad went free only if the cashier happened to know the offer and add
+it. Dine-in had less still — the round cart prices no promotions at all (D138,
+on purpose), so a waiter had no cue at the table and the discount surfaced on
+the bill sheet, if the salad had made it onto the table.
+
+### Industry, and where D171 sits against it
+
+Mainstream restaurant POS (Toast, Square for Restaurants, Lightspeed, Clover,
+TouchBistro) agree on two things: the free item must be ON the ticket to be
+free — rung up as a line at zero, never applied invisibly, never auto-added,
+because the kitchen needs the line and the receipt should show it — and
+payment is never blocked; a guest who declines the free item is simply not
+given it. They differ only in how loudly the cashier is reminded: silent
+auto-apply, a dismissible prompt (the common shape), or a prompt that must be
+answered before the order proceeds.
+
+D171 chose a fourth shape for retail — the reward is REQUIRED — on the PO's own
+reasoning that a customer who qualified must not leave without it. The PO has
+not reversed that for retail. For the restaurant they chose the third shape,
+and the difference is the guest: at a counter the shopkeeper decides what a
+good deal is, at a table a guest who does not want a salad should not be served
+one.
+
+### The decision
+
+**Every unfinished `BUY_X_GET_Y` on the restaurant POS puts a card in the cart
+— 🎁 offer name, "n × reward — free with this order", Add / Customer declined —
+and the order cannot be placed (counter) or sent (dine-in) until every card is
+answered.** Add puts the reward in the order through the same path as tapping
+its menu card (a variant or modifier question is still asked); declined clears
+that ask. Same card for a same-product offer ("1 × Kottu — free"), for D171's
+reason: one situation presented two ways teaches nobody anything.
+
+**Dine-in is judged over the whole table**: the sent rounds (non-DRAFT rounds,
+non-VOIDED items) plus the draft. Tea in round one and salad in round two is a
+complete offer; a prompt that read only the round being typed would ask a
+waiter for a salad the table already has. The gate is Confirm & send — the
+guest is in front of the waiter when the tea goes on, which is when the offer
+is naturally made. The bill sheet asks nothing again: it prices whatever the
+table holds, exactly as before.
+
+**A decline answers ONE ask.** Keyed `promotionId:needed` — a second tea earns a
+second salad, which is a new question. Counter declines live with the cart and
+die with the order; a table's declines live in `sessionStorage` per session
+(the D112 ready-ack pattern), so the waiter is not asked on every round. A
+different device picking up the table asks once more; a column on the order
+can follow if that grates.
+
+**Not changed:** the money. `applyPromotions` and the server's bill preview
+price what they are sent; this is a workflow gate, not authorization or
+pricing. Percentage, amount-off and bundle promotions ask nothing — nothing is
+owed under them, and the industry is silent there too. The other three surfaces
+of D171 (retail's list, notice and gate) are untouched.
+
+### Two small API additions
+
+- `GET /restaurant/table-sessions/:id/detail` items carry `productId`
+  (nullable; the row already stored it). Without it the till could count a
+  table's teas only by name.
+- `GET /products/sellable?productId=…` (repeatable, ≤ 20) — the till fetches a
+  reward the loaded catalogue page did not carry through the ONE read model
+  that shapes a product the way it consumes one (name, price, variants,
+  modifier groups, sold-out state). A second lookup path would be a second
+  place for that shape to drift. The filter narrows `total` like every other
+  and composes with them, so a reward the branch does not sell stays absent.
+
+### Where it lives
+
+- `lib/pos/offer-prompts.ts` — pure: `pendingOffers` (the applier's
+  `incompleteOffers` minus what was declined) and `sentLinesForOffers` (a
+  session detail as applier lines).
+- `components/pos/counter/offer-prompt-card.tsx` — the card, rendered in both
+  cart homes (aside and Sheet) because the body is.
+- `pos-counter-workspace.tsx` — the draft's applier lines are now ONE mapping
+  feeding both the money and the prompt; `canPlace` gains `!awaitingOffer`;
+  the footer names the offer as the closed gate rather than the role line; the
+  detail is kept (not just counted) and re-read after a send and on the rounds
+  sheet's loads.
+
+### Verified
+
+Unit (`offer-prompts.test.ts`, 7) and render
+(`pos-counter-workspace.offer-prompt.render.test.tsx`, 11) specs, plus the
+sellable filter (`sellable-product-id.spec.ts`, 3). Mutation-proven, each
+against the component: the gate dropped → 4 failed / 7 passed; dine-in reading
+the draft only → 2 / 9 (the "asks nothing" control passes on its own under
+this one, which is why the subtraction case pins an exact count); declines
+ignored → 5 / 6; the by-id fetch dropped → 1 / 10. One existing assertion was
+widened, deliberately and made stronger: the rounds sheet's `onLoaded` now
+carries the detail as a second argument, and its spec asserts both.
+
 ### D197a — the browser bill says "Bill S-000035", not "Bill # S-000035"
 
 PO, 2026-09-14, reading the first D197 bill off the till's browser print:

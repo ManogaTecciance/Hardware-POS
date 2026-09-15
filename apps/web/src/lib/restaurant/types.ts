@@ -459,6 +459,12 @@ export interface RoundView {
 export interface SessionDetailItem {
   id: string;
   menuItemId: string;
+  /**
+   * D198 — the Product behind the line, so the POS can count what the table
+   * already holds against a buy-X-get-Y offer. Null on a legacy MENU_ITEM
+   * line, which no promotion can name.
+   */
+  productId: string | null;
   menuItemName: string;
   /** D71 — "Medium" vs "Large" is what a guest is being charged for. */
   variantName: string | null;

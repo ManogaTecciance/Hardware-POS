@@ -42,6 +42,8 @@ import { SettingsService } from '../settings/settings.service';
 export interface SellableQuery {
   branchId: string;
   channel?: OrderChannel;
+  /** D198 — only these products (see the controller). Empty is no filter. */
+  productId?: string[];
   collectionId?: string;
   categoryId?: string;
   sellableKind?: SellableKind;
@@ -311,6 +313,12 @@ export class SellableService {
         }
         and.push({ attributes: { path: [attrKey], equals: coerced.value } });
       }
+    }
+    // D198 — a named set of products. A FILTER like the others (it narrows
+    // `total` too), and it composes with every one of them: a reward product
+    // the branch does not sell is absent from this answer as from any other.
+    if (query.productId && query.productId.length > 0) {
+      and.push({ id: { in: query.productId } });
     }
     // The keyset clause pages; the clauses above FILTER. `total` counts the
     // filter only, so it is stable across pages.

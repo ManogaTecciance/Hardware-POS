@@ -36,7 +36,7 @@ interface Props {
    * Fired after a void, and with the round count each load saw, so the strip
    * behind the sheet can stop guessing from what this device happened to send.
    */
-  onLoaded?: (roundsSent: number) => void;
+  onLoaded?: (roundsSent: number, detail: SessionDetail) => void;
 }
 
 /**
@@ -84,7 +84,8 @@ export function SessionRoundsSheet({
       const fetched = await tableSessions.getDetail(session, sessionId);
       setDetail(fetched);
       setError(null);
-      loadedRef.current?.(flattenSubmittedRounds(fetched).length);
+      // D198 — the detail rides along: the workspace judges offers over it.
+      loadedRef.current?.(flattenSubmittedRounds(fetched).length, fetched);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load this order');
     } finally {
