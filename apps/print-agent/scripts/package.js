@@ -7,7 +7,8 @@
  *
  * Contents are exactly what install.ps1 expects beside itself: dist/ (the
  * compiled agent), scripts/ (the Windows spooler helper), package.json,
- * install.ps1, install.cmd and README-CUSTOMER.md. No node_modules — the agent has no
+ * install.ps1, install.cmd, README-CUSTOMER.md and SETUP-GUIDE.html (the
+ * customer-facing guide). No node_modules — the agent has no
  * runtime dependencies, which is what makes "unzip and run" possible.
  *
  * Plain Node so it runs on the developer machine whatever the platform;
@@ -32,7 +33,7 @@ rmSync(stage, { recursive: true, force: true });
 rmSync(zip, { force: true });
 mkdirSync(stage, { recursive: true });
 
-for (const entry of ['dist', 'scripts', 'package.json', 'install.ps1', 'install.cmd', 'README-CUSTOMER.md']) {
+for (const entry of ['dist', 'scripts', 'package.json', 'install.ps1', 'install.cmd', 'README-CUSTOMER.md', 'SETUP-GUIDE.html']) {
   const from = join(root, entry);
   if (!existsSync(from)) {
     console.error(`missing ${entry}`);

@@ -1,5 +1,9 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { loadConfig, type AgentConfig } from './config';
+import { applyUpdate, installRootOf, markHealthy, reconcileAtBoot, RETRY_EVERY_MS } from './updater';
 import {
   listLocalPrinters,
   probe,
@@ -43,8 +47,16 @@ import {
  * is not.
  */
 
-// 0.2.0 — heartbeats carry the machine's installed printers (D183).
-const VERSION = '0.2.0';
+// One source of truth for the version: package.json ships beside dist and
+// the API reads the same file to decide what "current" is (D183).
+const INSTALL_ROOT = installRootOf(__filename);
+const VERSION = ((): string => {
+  try {
+    return (JSON.parse(readFileSync(join(INSTALL_ROOT, 'package.json'), 'utf8')) as { version?: string }).version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+})();
 
 interface LeasedJob {
   leaseId: string;
@@ -58,7 +70,12 @@ interface LeasedJob {
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  log(`starting v${VERSION} → ${config.apiUrl} (poll ${config.pollSeconds}s)`);
+  // Before anything else: if a self-update landed and this build keeps dying
+  // before it can check in, this is where it is rolled back.
+  if (config.autoUpdate) reconcileAtBoot(INSTALL_ROOT, log);
+  log(`starting v${VERSION} → ${config.apiUrl} (poll ${config.pollSeconds}s${config.autoUpdate ? '' : ', auto-update off'})`);
+  let provenHealthy = false;
+  let lastUpdateTry = 0;
 
   let lastDiscovery = 0;
   let discovering = false;
@@ -66,6 +83,13 @@ async function main(): Promise<void> {
   let discovered: Discovered[] = [];
   let localPrinters: LocalPrinter[] = [];
   let backoffMs = 0;
+  // What the server last heard about printers, and when: the report rides
+  // the heartbeat only when it changed or every REPORT_EVERY_MS as a keep-
+  // alive, not on all twenty heartbeats a minute. The server keeps the last
+  // report when a heartbeat says nothing (see reportDiscovery).
+  let lastReportKey = '';
+  let lastReportAt = 0;
+  const REPORT_EVERY_MS = 60_000;
 
   // Discovery runs beside the loop, never in it: a /24 sweep takes seconds
   // and Get-Printer can take twenty on a slow PC, and a heartbeat that late
@@ -110,20 +134,65 @@ async function main(): Promise<void> {
       // Until the first scan has finished, say nothing about printers: an
       // empty list would replace the server's last good one every time this
       // process restarts, and "nothing found" must mean nothing was found.
-      await post(config, '/print-agent/heartbeat', {
+      const report = discoveryReady
+        ? {
+            discovered: discovered.map((d) => ({
+              host: d.host,
+              port: d.port,
+              latencyMs: d.latencyMs,
+              escpos: d.escpos,
+            })),
+            localPrinters: localPrinters.map((p) => ({ name: p.name, driver: p.driver, port: p.port })),
+          }
+        : null;
+      // Latency jitters on every sweep and must not count as a change.
+      const reportKey = report
+        ? JSON.stringify({
+            d: report.discovered.map((d) => [d.host, d.port, d.escpos]),
+            l: report.localPrinters,
+          })
+        : '';
+      const sendReport =
+        report !== null && (reportKey !== lastReportKey || Date.now() - lastReportAt > REPORT_EVERY_MS);
+      const heartbeat = (await post(config, '/print-agent/heartbeat', {
         version: VERSION,
-        ...(discoveryReady
-          ? {
-              discovered: discovered.map((d) => ({
-                host: d.host,
-                port: d.port,
-                latencyMs: d.latencyMs,
-                escpos: d.escpos,
-              })),
-              localPrinters: localPrinters.map((p) => ({ name: p.name, driver: p.driver, port: p.port })),
-            }
-          : {}),
-      });
+        ...(sendReport ? report : {}),
+      })) as { scanNow?: boolean; latestVersion?: string | null } | null;
+      // A heartbeat that was answered proves this build; a rolled-in update
+      // is only "pending" until this line runs once.
+      if (!provenHealthy) {
+        provenHealthy = true;
+        if (config.autoUpdate) markHealthy(INSTALL_ROOT);
+      }
+      if (sendReport) {
+        lastReportKey = reportKey;
+        lastReportAt = Date.now();
+      }
+      // The settings screen pressed Refresh: sweep now, not at the next
+      // 2-minute mark. Same non-blocking path; a sweep already running is
+      // fresh enough.
+      if (heartbeat?.scanNow) refreshDiscovery();
+
+      // D183 — the API carries a newer build: fetch it, verify it, swap it
+      // in and restart (the service wrapper brings us back). Throttled so a
+      // build that cannot be fetched is retried every few minutes, not every
+      // heartbeat.
+      const latest = heartbeat?.latestVersion;
+      if (
+        config.autoUpdate &&
+        latest &&
+        latest !== VERSION &&
+        Date.now() - lastUpdateTry > RETRY_EVERY_MS
+      ) {
+        lastUpdateTry = Date.now();
+        await applyUpdate(latest, {
+          root: INSTALL_ROOT,
+          currentVersion: VERSION,
+          log,
+          fetchManifest: () => get(config, '/print-agent/release') as Promise<import('./updater').ReleaseManifest>,
+          fetchFile: (path) => getBytes(config, `/print-agent/release/files/${path}`),
+        });
+      }
 
       const jobs = (await post(config, '/print-agent/lease', { maxJobs: 8 })) as LeasedJob[];
       backoffMs = 0;
@@ -167,6 +236,26 @@ async function main(): Promise<void> {
       await sleep(backoffMs);
     }
   }
+}
+
+async function get(config: AgentConfig, path: string): Promise<unknown> {
+  const response = await fetch(`${config.apiUrl}/v1${path}`, {
+    headers: { authorization: `Bearer ${config.token}` },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`${path} → HTTP ${response.status} ${text.slice(0, 200)}`);
+  }
+  const parsed = (await response.json().catch(() => null)) as { data?: unknown } | null;
+  return parsed && typeof parsed === 'object' && 'data' in parsed ? parsed.data : parsed;
+}
+
+async function getBytes(config: AgentConfig, path: string): Promise<Buffer> {
+  const response = await fetch(`${config.apiUrl}/v1${path}`, {
+    headers: { authorization: `Bearer ${config.token}` },
+  });
+  if (!response.ok) throw new Error(`${path} → HTTP ${response.status}`);
+  return Buffer.from(await response.arrayBuffer());
 }
 
 async function post(config: AgentConfig, path: string, body: unknown): Promise<unknown> {

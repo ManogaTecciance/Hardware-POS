@@ -439,6 +439,9 @@ const ROUTE_CLASSIFICATION: Record<string, Classification> = {
   'POST /print-agent/heartbeat': { module: 'SHARED_CORE', guard: 'public-no-tenant', scope: T },
   'POST /print-agent/lease': { module: 'SHARED_CORE', guard: 'public-no-tenant', scope: T },
   'POST /print-agent/ack': { module: 'SHARED_CORE', guard: 'public-no-tenant', scope: T },
+  'GET /print-agent/release': { module: 'SHARED_CORE', guard: 'public-no-tenant', scope: T },
+  'GET /print-agent/release/files/:dir/:name': { module: 'SHARED_CORE', guard: 'public-no-tenant', scope: T },
+  'GET /print-agent/release/files/:name': { module: 'SHARED_CORE', guard: 'public-no-tenant', scope: T },
   'GET /restaurant/takeaway': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
   'POST /restaurant/takeaway': { module: 'TAKEAWAY', guard: 'ENFORCED', scope: T },
   // D117 — money without handover: close the session into a Sale, status untouched.

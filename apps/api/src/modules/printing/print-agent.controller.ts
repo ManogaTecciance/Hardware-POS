@@ -1,10 +1,15 @@
 import {
   Body,
   Controller,
+  Get,
+  NotFoundException,
+  Param,
   Post,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -22,6 +27,7 @@ import {
 
 import { Public } from '../../common/decorators/public.decorator';
 import { PrintAgentGuard, type AgentRequest } from './print-agent.guard';
+import { AgentReleaseService } from './agent-release.service';
 import { PrintAgentService, type AgentPrintJob } from './print-agent.service';
 
 /**
@@ -82,7 +88,10 @@ class AckDto {
 @Public()
 @UseGuards(PrintAgentGuard)
 export class PrintAgentController {
-  constructor(private readonly agents: PrintAgentService) {}
+  constructor(
+    private readonly agents: PrintAgentService,
+    private readonly release: AgentReleaseService,
+  ) {}
 
   /**
    * Liveness, version, and (optionally) what the agent can see on the LAN.
@@ -108,10 +117,50 @@ export class PrintAgentController {
       );
     }
     await this.agents.heartbeat(agent.agentId, dto.version);
-    return { ok: true, branchId: agent.branchId, name: agent.name };
+    return {
+      ok: true,
+      branchId: agent.branchId,
+      name: agent.name,
+      /** D183 — the settings screen asked for a fresh scan; do one now. */
+      scanNow: this.agents.takeScanRequest(agent.branchId),
+      /** D183 — the build this API carries; the agent updates itself to it. */
+      latestVersion: this.release.latestVersion(),
+    };
   }
 
   /** Claim a batch of ready-to-print documents. */
+  /**
+   * D183 — the agent build this API ships, for self-update. Behind the agent
+   * token like everything else here: the code is not a secret, but an open
+   * file server is not something a print API should be.
+   */
+  @Get('release')
+  releaseManifest() {
+    const manifest = this.release.manifest();
+    if (!manifest) throw new NotFoundException('This API carries no print-agent build');
+    return manifest;
+  }
+
+  /** One shipped file, by the exact path the manifest lists: `dir/name`… */
+  @Get('release/files/:dir/:name')
+  releaseFile(@Param('dir') dir: string, @Param('name') name: string, @Res() res: Response) {
+    this.sendReleaseFile(`${dir}/${name}`, res);
+  }
+
+  /** …or a root file (`package.json` — the only one the manifest ever lists). */
+  @Get('release/files/:name')
+  releaseRootFile(@Param('name') name: string, @Res() res: Response) {
+    this.sendReleaseFile(name, res);
+  }
+
+  private sendReleaseFile(path: string, res: Response): void {
+    const { bytes, entry } = this.release.file(path);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Length', String(entry.size));
+    res.setHeader('X-Sha256', entry.sha256);
+    res.send(bytes);
+  }
+
   @Post('lease')
   lease(@Req() request: AgentRequest, @Body() dto: LeaseDto): Promise<AgentPrintJob[]> {
     return this.agents.lease(request.agent!, dto.maxJobs ?? 8);

@@ -5,9 +5,9 @@ Generated and enforced by
 route metadata off the real controller classes. **Do not edit the totals by hand** —
 that spec fails when this document and the code disagree.
 
-- Total routes: 340
+- Total routes: 343
 - Module-guarded routes: 235
-- Ungated routes: 105
+- Ungated routes: 108
 
 ## How to read the Guard column
 
@@ -518,6 +518,9 @@ the request, so a stolen token can only drain its own branch's print queue.
 | POST | `/print-agent/heartbeat` | SHARED_CORE | public-no-tenant | _agent token_ |
 | POST | `/print-agent/lease` | SHARED_CORE | public-no-tenant | _agent token_ |
 | POST | `/print-agent/ack` | SHARED_CORE | public-no-tenant | _agent token_ |
+| GET | `/print-agent/release` | SHARED_CORE | public-no-tenant | _agent token_ |
+| GET | `/print-agent/release/files/:dir/:name` | SHARED_CORE | public-no-tenant | _agent token_ |
+| GET | `/print-agent/release/files/:name` | SHARED_CORE | public-no-tenant | _agent token_ |
 
 ### TableSessionsController
 

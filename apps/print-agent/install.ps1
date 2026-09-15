@@ -33,9 +33,11 @@
 # Everything it prints is also in %TEMP%\axlo-print-agent-install.log, and the
 # window waits for Enter before closing, so an error can actually be read.
 #
-# Re-running is safe: it re-copies the files, keeps an existing agent.json
-# unless -Token is given, and re-registers the service. That is also how an
-# agent is UPDATED - unzip the new release over the old one and run this.
+# Re-running is safe: it re-copies the files, asks about an existing
+# agent.json, and re-registers the service. Day-to-day UPDATES do not need
+# it: the installed agent fetches newer builds from the API by itself
+# (D183). Re-run this only to change the token/address or after a wedged
+# agent, or when node.exe or nssm themselves must change.
 [CmdletBinding()]
 param(
   [string]$ApiUrl = "https://api.axlopos.com",
@@ -98,6 +100,25 @@ if (-not $isAdmin) {
   Finish 0
 }
 
+# Run nssm and return what it printed, never throwing. Two Windows PowerShell
+# 5.1 facts make this necessary: a native program's stderr redirected with
+# 2>&1 becomes an ErrorRecord, and under $ErrorActionPreference = "Stop" that
+# record TERMINATES the script - so nssm's harmless "STOP: The service has not
+# been started" once ended an install as FAILED. And nssm prints UTF-16, so
+# the text is cleaned before anyone compares it.
+function Invoke-Nssm {
+  param([string]$Exe, [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $out = & $Exe @Rest 2>&1 | ForEach-Object { "$_" }
+    $script:NssmExit = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $prev
+  }
+  return (($out -join " ") -replace "[^\x20-\x7E]", "").Trim()
+}
+
 function Find-Nssm {
   foreach ($candidate in @("$InstallDir\tools\nssm.exe", "$Here\tools\nssm.exe", "$Here\nssm.exe")) {
     if (Test-Path $candidate) { return $candidate }
@@ -112,8 +133,9 @@ if ($Uninstall) {
   Step "Removing the $ServiceName service"
   $nssm = Find-Nssm
   if (Get-Service $ServiceName -ErrorAction SilentlyContinue) {
-    if ($nssm) { & $nssm stop $ServiceName confirm 2>&1 | Out-Null; & $nssm remove $ServiceName confirm 2>&1 | Out-Null }
+    if ($nssm) { Invoke-Nssm $nssm stop $ServiceName confirm | Out-Null; Invoke-Nssm $nssm remove $ServiceName confirm | Out-Null }
     else { Stop-Service $ServiceName -Force -ErrorAction SilentlyContinue; sc.exe delete $ServiceName | Out-Null }
+    Remove-Item "$InstallDir\dist.prev", "$InstallDir\dist.next", "$InstallDir\dist.broken", "$InstallDir\scripts.prev", "$InstallDir\scripts.next", "$InstallDir\scripts.broken", "$InstallDir\update.json", "$InstallDir\update-failed.json" -Recurse -Force -ErrorAction SilentlyContinue
     Ok "Service removed. The folder $InstallDir and its agent.json are kept."
   } else { Ok "No service was installed." }
   Finish 0
@@ -172,7 +194,7 @@ $nodeExe = "$InstallDir\tools\node.exe"
 if ((Test-Path $nodeExe) -and (Get-Service $ServiceName -ErrorAction SilentlyContinue)) {
   # The old service may still hold the file open; stop it before overwriting.
   $oldNssm = Find-Nssm
-  if ($oldNssm) { & $oldNssm stop $ServiceName confirm 2>$null | Out-Null } else { Stop-Service $ServiceName -Force -ErrorAction SilentlyContinue }
+  if ($oldNssm) { Invoke-Nssm $oldNssm stop $ServiceName confirm | Out-Null } else { Stop-Service $ServiceName -Force -ErrorAction SilentlyContinue }
   Start-Sleep -Seconds 1
 }
 Copy-Item $realNode $nodeExe -Force
@@ -182,8 +204,28 @@ Ok "Files in place; the service will run its own copy of Node.js $bundledVersion
 # ── 4. agent.json ───────────────────────────────────────────────────────────
 Step "Configuring"
 $configPath = "$InstallDir\agent.json"
-if (-not $Token -and (Test-Path $configPath)) {
-  Ok "Keeping the existing agent.json (pass -Token to replace it)"
+$existing = $null
+if (Test-Path $configPath) {
+  try { $existing = ((Get-Content $configPath -Raw) -replace "^\xEF\xBB\xBF|^\uFEFF", "") | ConvertFrom-Json } catch { $existing = $null }
+}
+$keepExisting = $false
+if ($existing -and -not $Token -and -not $PSBoundParameters.ContainsKey('ApiUrl')) {
+  # A leftover from an earlier attempt is the usual case here, and it is
+  # usually WRONG (the first customer install kept one that pointed at the
+  # cloud API). Show it; keeping it is a choice, not the default silence.
+  Write-Host ""
+  Write-Host "    This PC already has an agent.json:" -ForegroundColor White
+  Write-Host "      name:        $($existing.name)" -ForegroundColor White
+  Write-Host "      API address: $($existing.apiUrl)" -ForegroundColor White
+  Write-Host "      token:       $(if ($existing.token) { ([string]$existing.token).Substring(0, [Math]::Min(8, ([string]$existing.token).Length)) + '...' } else { '(none)' })" -ForegroundColor White
+  $answer = (Read-Host "    Keep it? Type y to keep, or n to enter a new API address and token [y/N]").Trim()
+  $keepExisting = ($answer -match '^[Yy]')
+}
+if ($keepExisting) {
+  # Re-save it without a byte-order mark, in case the old installer wrote one.
+  $config = [ordered]@{ apiUrl = ([string]$existing.apiUrl).Trim(); token = [string]$existing.token; name = $(if ($existing.name) { [string]$existing.name } else { $Name }) }
+  [IO.File]::WriteAllText($configPath, (($config | ConvertTo-Json) + "`n"), (New-Object System.Text.UTF8Encoding $false))
+  Ok "Keeping agent.json for '$($config.name)' -> $($config.apiUrl)"
 } else {
   if (-not $PSBoundParameters.ContainsKey('ApiUrl')) {
     Write-Host ""
@@ -229,23 +271,27 @@ if (-not $nssm) {
   $nssm = "$InstallDir\tools\nssm.exe"
 }
 if (Get-Service $ServiceName -ErrorAction SilentlyContinue) {
-  & $nssm stop $ServiceName confirm 2>&1 | Out-Null
-  & $nssm remove $ServiceName confirm 2>&1 | Out-Null
+  Invoke-Nssm $nssm stop $ServiceName confirm | Out-Null
+  Invoke-Nssm $nssm remove $ServiceName confirm | Out-Null
+  Start-Sleep -Seconds 1
 }
-& $nssm install $ServiceName $nodeExe "`"$InstallDir\dist\index.js`"" | Out-Null
-& $nssm set $ServiceName AppDirectory $InstallDir | Out-Null
-& $nssm set $ServiceName DisplayName "AxloPOS print agent" | Out-Null
-& $nssm set $ServiceName Description "Prints AxloPOS kitchen tickets and bills on this shop's printers." | Out-Null
-& $nssm set $ServiceName Start SERVICE_AUTO_START | Out-Null
-& $nssm set $ServiceName AppStdout "$InstallDir\agent.log" | Out-Null
-& $nssm set $ServiceName AppStderr "$InstallDir\agent.log" | Out-Null
-& $nssm set $ServiceName AppRotateFiles 1 | Out-Null
-& $nssm set $ServiceName AppRotateBytes 5000000 | Out-Null
-& $nssm set $ServiceName AppExit Default Restart | Out-Null
-& $nssm set $ServiceName AppRestartDelay 5000 | Out-Null
+$installed = Invoke-Nssm $nssm install $ServiceName $nodeExe "`"$InstallDir\dist\index.js`""
+if ($script:NssmExit -ne 0) { throw "nssm could not register the service: $installed" }
+foreach ($setting in @(
+  @("AppDirectory", $InstallDir),
+  @("DisplayName", "AxloPOS print agent"),
+  @("Description", "Prints AxloPOS kitchen tickets and bills on this shop's printers."),
+  @("Start", "SERVICE_AUTO_START"),
+  @("AppStdout", "$InstallDir\agent.log"),
+  @("AppStderr", "$InstallDir\agent.log"),
+  @("AppRotateFiles", "1"),
+  @("AppRotateBytes", "5000000"),
+  @("AppExit", "Default", "Restart"),
+  @("AppRestartDelay", "5000")
+)) { Invoke-Nssm $nssm set $ServiceName @setting | Out-Null }
 # Registered without AppExit throttling surprises: nssm pauses a service whose
 # program keeps exiting at once, and reports it as SERVICE_PAUSED on start.
-& $nssm start $ServiceName 2>&1 | Out-Null
+Invoke-Nssm $nssm start $ServiceName | Out-Null
 # Ask Windows, not nssm: nssm prints its status as UTF-16 and the captured
 # text carries invisible characters, so "SERVICE_RUNNING" never compared
 # equal and a healthy install was reported as FAILED.

@@ -267,7 +267,10 @@ function relativeTime(iso: string): string {
   return hours < 48 ? `${hours} h ago` : new Date(iso).toLocaleString();
 }
 
-type DiscoveryStatus = 'idle' | 'loading' | 'ready' | 'error';
+type DiscoveryStatus = 'idle' | 'loading' | 'scanning' | 'ready' | 'error';
+
+/** How long the agent is given to sweep after Refresh before the screen re-reads (its poll is 3 s, a sweep a few more). */
+export const SCAN_NOW_WAIT_MS = 8_000;
 
 function PrintersCard({
   session,
@@ -297,15 +300,24 @@ function PrintersCard({
    */
   const [discovery, setDiscovery] = React.useState<PrinterDiscoveryView | null>(null);
   const [discoveryStatus, setDiscoveryStatus] = React.useState<DiscoveryStatus>('idle');
-  const loadDiscovery = React.useCallback(async () => {
-    setDiscoveryStatus('loading');
-    try {
-      setDiscovery(await printing.discover(session, branchId));
-      setDiscoveryStatus('ready');
-    } catch {
-      setDiscoveryStatus('error');
-    }
-  }, [session, branchId]);
+  const loadDiscovery = React.useCallback(
+    async (scanNow = false) => {
+      setDiscoveryStatus(scanNow ? 'scanning' : 'loading');
+      try {
+        // With scanNow the agent is asked to sweep again; what comes back
+        // first is still the old report, so wait for the sweep and re-read.
+        setDiscovery(await printing.discover(session, branchId, { refresh: scanNow }));
+        if (scanNow) {
+          await new Promise((done) => window.setTimeout(done, SCAN_NOW_WAIT_MS));
+          setDiscovery(await printing.discover(session, branchId));
+        }
+        setDiscoveryStatus('ready');
+      } catch {
+        setDiscoveryStatus('error');
+      }
+    },
+    [session, branchId],
+  );
 
   const codes = printers.map((p) => p.code);
 
@@ -397,7 +409,7 @@ function PrinterForm({
   agentOnline: boolean;
   discovery: PrinterDiscoveryView | null;
   discoveryStatus: DiscoveryStatus;
-  onRefreshDiscovery: () => Promise<void>;
+  onRefreshDiscovery: (scanNow?: boolean) => Promise<void>;
   initial?: KitchenPrinterView;
   onDone: () => Promise<void>;
   onCancel: () => void;
@@ -514,6 +526,11 @@ function PrinterForm({
       <span className="inline-flex items-center gap-1">
         <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Looking for printers…
       </span>
+    ) : discoveryStatus === 'scanning' ? (
+      <span className="inline-flex items-center gap-1">
+        <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Asking the agent to scan the PC and the
+        network…
+      </span>
     ) : discoveryStatus === 'error' ? (
       'Could not look for printers.'
     ) : discovery?.source === 'AGENT' ? (
@@ -607,13 +624,14 @@ function PrinterForm({
             <span className="text-sm font-medium">{kindInfo.addressLabel}</span>
             <span className="text-xs text-muted-foreground">
               {discoveryLine}
-              {discoveryStatus !== 'loading' ? (
+              {discoveryStatus !== 'loading' && discoveryStatus !== 'scanning' ? (
                 <button
                   type="button"
                   className="ml-2 inline-flex items-center gap-1 underline-offset-2 hover:underline"
-                  onClick={() => void onRefreshDiscovery()}
+                  onClick={() => void onRefreshDiscovery(true)}
+                  title="Ask the agent to look again right now — for a printer you just plugged in"
                 >
-                  <RefreshCw className="h-3 w-3" aria-hidden /> Refresh
+                  <RefreshCw className="h-3 w-3" aria-hidden /> Scan again
                 </button>
               ) : null}
             </span>
@@ -919,7 +937,7 @@ function PrinterRow({
   agentOnline: boolean;
   discovery: PrinterDiscoveryView | null;
   discoveryStatus: DiscoveryStatus;
-  onRefreshDiscovery: () => Promise<void>;
+  onRefreshDiscovery: (scanNow?: boolean) => Promise<void>;
   canManage: boolean;
   onChange: () => Promise<void>;
 }) {
@@ -1356,6 +1374,9 @@ function AgentsCard({
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {a.lastSeenAt ? `Last seen ${relativeTime(a.lastSeenAt)}` : 'Never checked in'}
                 {a.version ? ` · v${a.version}` : ''}
+                {a.isActive && a.online && a.version && a.latestVersion && a.version !== a.latestVersion
+                  ? ` · updating to ${a.latestVersion}…`
+                  : ''}
               </p>
               {a.isActive && !a.lastSeenAt ? (
                 <p className="mt-0.5 text-xs text-warning">

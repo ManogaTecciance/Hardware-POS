@@ -20,6 +20,12 @@ export interface AgentConfig {
   discoverySeconds: number;
   /** Port to look for printers on. 9100 is the raw ESC/POS standard. */
   printerPort: number;
+  /**
+   * D183 — replace this agent's code with the build the API ships, when it
+   * is newer. Off for a terminal run (nothing would restart it) unless
+   * asked; `false` in agent.json pins a shop to what it has.
+   */
+  autoUpdate: boolean;
 }
 
 const DEFAULTS = {
@@ -66,7 +72,13 @@ export function loadConfig(configPath = process.env.AGENT_CONFIG ?? 'agent.json'
       DEFAULTS.discoverySeconds,
     ),
     printerPort: num(process.env.AGENT_PRINTER_PORT, fileConfig.printerPort, DEFAULTS.printerPort),
+    autoUpdate: bool(process.env.AGENT_AUTO_UPDATE, fileConfig.autoUpdate, true),
   };
+}
+
+function bool(env: string | undefined, file: boolean | undefined, fallback: boolean): boolean {
+  if (env !== undefined) return !/^(0|false|no|off)$/i.test(env.trim());
+  return typeof file === 'boolean' ? file : fallback;
 }
 
 function num(env: string | undefined, file: number | undefined, fallback: number): number {

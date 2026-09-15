@@ -64,10 +64,26 @@ export class PrintAgentService {
     { at: Date; agentName: string; printers: DiscoveredPrinter[]; localPrinters: LocalPrinter[] }
   >();
 
+  /**
+   * D183 — branches whose settings screen pressed Refresh. Handed to that
+   * branch's agent on its next heartbeat, once, so a printer plugged in a
+   * moment ago shows up in seconds instead of at the next 2-minute sweep.
+   */
+  private readonly scanRequests = new Set<string>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly dispatcher: PrintDispatcherService,
   ) {}
+
+  requestScan(branchId: string): void {
+    this.scanRequests.add(branchId);
+  }
+
+  /** True once per request — the first heartbeat after it takes it. */
+  takeScanRequest(branchId: string): boolean {
+    return this.scanRequests.delete(branchId);
+  }
 
   // ── Pairing (owner-facing) ──────────────────────────────────────────────
 

@@ -7,6 +7,7 @@ import { RequireModule } from '../../common/decorators/require-module.decorator'
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { TenantId } from '../../common/decorators/tenant-id.decorator';
 import { Permission } from '../auth/permissions';
+import { AgentReleaseService } from './agent-release.service';
 import { PrintAgentService } from './print-agent.service';
 import { PrintDispatcherService } from './print-dispatcher.service';
 import {
@@ -38,6 +39,7 @@ export class PrintingController {
     private readonly dispatcher: PrintDispatcherService,
     private readonly discovery: PrinterDiscoveryService,
     private readonly agents: PrintAgentService,
+    private readonly release: AgentReleaseService,
   ) {}
 
   /**
@@ -55,8 +57,12 @@ export class PrintingController {
 
   @Get('agents')
   @RequirePermissions(Permission.KITCHEN_STATION_MANAGE)
-  listAgents(@TenantId() tenantId: string, @Query('branchId') branchId: string) {
-    return this.agents.listAgents(tenantId, branchId);
+  async listAgents(@TenantId() tenantId: string, @Query('branchId') branchId: string) {
+    // D183 — the build this API ships, so the screen can say "updating to…"
+    // next to an agent that is behind. Null when the API carries no build.
+    const latestVersion = this.release.latestVersion();
+    const rows = await this.agents.listAgents(tenantId, branchId);
+    return rows.map((row) => ({ ...row, latestVersion }));
   }
 
   @Post('agents/:agentId/revoke')
@@ -98,9 +104,17 @@ export class PrintingController {
    */
   @Get('discover')
   @RequirePermissions(Permission.KITCHEN_STATION_MANAGE)
-  async discover(@Query('branchId') branchId?: string, @Query('port') port?: string) {
+  async discover(
+    @Query('branchId') branchId?: string,
+    @Query('port') port?: string,
+    @Query('refresh') refresh?: string,
+  ) {
     const parsed = Number(port);
     const wanted = Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_PRINTER_PORT;
+    // D183 — `refresh=1` asks the branch's agent to scan again right away;
+    // the answer below is still the LAST report, the new one lands on the
+    // agent's next heartbeat and the screen re-reads a few seconds later.
+    if (branchId && (refresh === '1' || refresh === 'true')) this.agents.requestScan(branchId);
 
     /*
      * Whoever can SEE the shop network answers this. In the cloud

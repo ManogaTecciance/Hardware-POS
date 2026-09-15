@@ -42,7 +42,9 @@ RUN pnpm install --frozen-lockfile
 # ---- Build ----
 COPY . .
 # turbo builds deps first (^build): shared -> database (prisma generate + tsc) -> api
-RUN pnpm turbo run build --filter=@hardware-pos/api
+# The print agent is built beside the API so the image can serve it to
+# every shop's installed agent (self-update, D183).
+RUN pnpm turbo run build --filter=@hardware-pos/api --filter=@hardware-pos/print-agent
 
 # TZ=UTC makes "every datetime is stored in UTC" an invariant of the image rather
 # than an accident of the host. Nothing user-facing depends on the process zone:

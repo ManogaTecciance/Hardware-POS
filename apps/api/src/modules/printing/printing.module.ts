@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { SettingsModule } from '../settings/settings.module';
+import { AgentReleaseService } from './agent-release.service';
 import { PrintAgentController } from './print-agent.controller';
 import { PrintAgentGuard } from './print-agent.guard';
 import { PrintAgentService } from './print-agent.service';
@@ -23,6 +24,7 @@ import { PrintingService } from './printing.service';
   imports: [SettingsModule],
   controllers: [PrintingController, PrintAgentController],
   providers: [
+    AgentReleaseService,
     PrintDispatcherService,
     PrintingService,
     PrintWorkerService,

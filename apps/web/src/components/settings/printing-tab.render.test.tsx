@@ -1,5 +1,5 @@
 /**
- * D183 — the Printing tab, where a printer is chosen rather than typed.
+ * D183 â€” the Printing tab, where a printer is chosen rather than typed.
  *
  * ## What makes these assertions non-vacuous (D30)
  *
@@ -21,7 +21,7 @@ import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ConfirmProvider } from '@/components/ui/confirm';
-import { AGENT_POLL_MS, PrintingTab, agentApiUrl } from './printing-tab';
+import { AGENT_POLL_MS, PrintingTab, SCAN_NOW_WAIT_MS, agentApiUrl } from './printing-tab';
 import { kitchenPrinters, kitchenStations, printing } from '@/lib/restaurant/api';
 import type {
   KitchenPrinterView,
@@ -156,17 +156,42 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe('PrintingTab — adding a printer from what the agent found', () => {
+describe('PrintingTab â€” adding a printer from what the agent found', () => {
   it('opening the form asks for discovery once and suggests the next free code', async () => {
     await open({ printers: [Q80B] });
     expect(mock.discover).not.toHaveBeenCalled();
     await openAddForm();
-    expect(mock.discover).toHaveBeenCalledWith(session, BRANCH);
+    expect(mock.discover).toHaveBeenCalledWith(session, BRANCH, { refresh: false });
     // KITCHEN-1 is taken by the Q80B, so the suggestion moves on.
     expect((screen.getByLabelText('Printer code') as HTMLInputElement).value).toBe('KITCHEN-2');
-    // …and follows the role until the owner types a code.
+    // â€¦and follows the role until the owner types a code.
     fireEvent.change(screen.getByLabelText('Printer role'), { target: { value: 'CASHIER' } });
     expect((screen.getByLabelText('Printer code') as HTMLInputElement).value).toBe('CASHIER-1');
+  });
+
+  it('Scan again asks the agent to sweep, waits, then shows what the sweep found', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await open({ discovery: { ...DISCOVERY, printers: [] } });
+      await openAddForm();
+      expect(screen.getByText(/No printer answered/)).toBeTruthy();
+      // The first answer after Refresh is still the old report; the sweep's
+      // result arrives on the re-read after the wait.
+      mock.discover
+        .mockResolvedValueOnce({ ...DISCOVERY, printers: [] })
+        .mockResolvedValueOnce(DISCOVERY);
+      fireEvent.click(screen.getByRole('button', { name: /Scan again/ }));
+      await waitFor(() => expect(mock.discover).toHaveBeenLastCalledWith(session, BRANCH, { refresh: true }));
+      expect(screen.getByText(/Asking the agent to scan/)).toBeTruthy();
+      await vi.advanceTimersByTimeAsync(SCAN_NOW_WAIT_MS + 50);
+      await waitFor(() =>
+        expect(within(screen.getByRole('group', { name: /found on the network/i })).getByRole('button', { name: /192\.168\.123\.100/ })).toBeTruthy(),
+      );
+      // Opening the form does NOT ask for a sweep â€” only the button does.
+      expect(mock.discover.mock.calls[0]![2]).toEqual({ refresh: false });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('a network printer: clicking a discovered host fills the address and is what gets created', async () => {
@@ -207,14 +232,14 @@ describe('PrintingTab — adding a printer from what the agent found', () => {
     expect(chips[1]!.getAttribute('title')).toContain('Wi-Fi / office printer');
   });
 
-  it('a USB printer: the agent PC’s printers are offered, real ones first, and the exact name is sent', async () => {
+  it('a USB printer: the agent PCâ€™s printers are offered, real ones first, and the exact name is sent', async () => {
     await open();
     await openAddForm();
     setKind('ESC_POS_USB');
     const picker = screen.getByLabelText('Windows printer') as HTMLSelectElement;
     const labels = () => Array.from(picker.options).map((o) => o.textContent ?? '');
     // USB shows the USB printer and NOT the Wi-Fi Canon or the print-to-file
-    // devices — those are on WSD / PORTPROMPT ports, not USB ones.
+    // devices â€” those are on WSD / PORTPROMPT ports, not USB ones.
     expect(labels().some((l) => l.startsWith('Xprinter XP-365B'))).toBe(true);
     expect(labels().some((l) => l.startsWith('Canon G3010'))).toBe(false);
     expect(labels().some((l) => l.startsWith('Microsoft Print to PDF'))).toBe(false);
@@ -313,7 +338,7 @@ describe('PrintingTab — adding a printer from what the agent found', () => {
   });
 });
 
-describe('PrintingTab — the print agent', () => {
+describe('PrintingTab â€” the print agent', () => {
   it('pairing shows the API address the installer must be given, the token, and one command', async () => {
     await open();
     mock.pairAgent.mockResolvedValue({ id: 'agt_new', name: 'Counter PC', token: 'pat_abc123' });
@@ -321,7 +346,7 @@ describe('PrintingTab — the print agent', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pair agent' }));
     const box = await screen.findByTestId('pairing-box');
     const url = agentApiUrl();
-    // The app's own API base, without /v1 — what the first customer install got wrong.
+    // The app's own API base, without /v1 â€” what the first customer install got wrong.
     expect(url).toMatch(/^https?:\/\//);
     expect(url).not.toMatch(/\/v1\/?$/);
     expect(box.textContent).toContain(url);
@@ -336,7 +361,7 @@ describe('PrintingTab — the print agent', () => {
     expect(screen.getByText(/different API address than/).textContent).toContain(agentApiUrl());
   });
 
-  it('Remove asks, then deletes the agent and reloads — for a revoked one too', async () => {
+  it('Remove asks, then deletes the agent and reloads â€” for a revoked one too', async () => {
     await open({ agents: [{ ...AGENT_ONLINE, isActive: false, online: false }] });
     mock.removeAgent.mockResolvedValue({ ok: true });
     expect(screen.getByText('Revoked')).toBeTruthy();
@@ -348,7 +373,7 @@ describe('PrintingTab — the print agent', () => {
     await waitFor(() => expect(mock.agents).toHaveBeenCalledTimes(2));
   });
 
-  it('the Online badge appears by itself once the agent checks in — no reload', async () => {
+  it('the Online badge appears by itself once the agent checks in â€” no reload', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       await open({ agents: [{ ...AGENT_ONLINE, online: false, lastSeenAt: null }] });
@@ -357,7 +382,7 @@ describe('PrintingTab — the print agent', () => {
       await vi.advanceTimersByTimeAsync(AGENT_POLL_MS + 50);
       await waitFor(() => expect(screen.getByText('Online')).toBeTruthy());
       expect(mock.agents.mock.calls.length).toBeGreaterThanOrEqual(2);
-      // Only the agents (and, every third tick, the queue) are re-read — not the printers.
+      // Only the agents (and, every third tick, the queue) are re-read â€” not the printers.
       expect(mock.list).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
@@ -365,7 +390,7 @@ describe('PrintingTab — the print agent', () => {
   });
 });
 
-describe('PrintingTab — removing a printer', () => {
+describe('PrintingTab â€” removing a printer', () => {
   it('Remove asks first, names the stations that lose their printer, then deletes and reloads', async () => {
     await open({ printers: [Q80B] });
     fireEvent.click(screen.getByRole('button', { name: 'Remove Kitchen XP-Q80B' }));
@@ -389,7 +414,7 @@ describe('PrintingTab — removing a printer', () => {
   });
 });
 
-describe('PrintingTab — editing a printer', () => {
+describe('PrintingTab â€” editing a printer', () => {
   it('Edit sends only the changed address, with the code fixed', async () => {
     await open({ printers: [Q80B] });
     fireEvent.click(screen.getByRole('button', { name: 'Edit Kitchen XP-Q80B' }));

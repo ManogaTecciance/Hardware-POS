@@ -1018,9 +1018,9 @@ export const printing = {
    * installed on the agent PC. The Add-printer form offers these instead of
    * asking for an IP or a spooler name from memory.
    */
-  discover(session: Session, branchId: string) {
+  discover(session: Session, branchId: string, opts: { refresh?: boolean } = {}) {
     return api.get<PrinterDiscoveryView>(
-      `/printing/discover?branchId=${encodeURIComponent(branchId)}`,
+      `/printing/discover?branchId=${encodeURIComponent(branchId)}${opts.refresh ? '&refresh=1' : ''}`,
       auth(session),
     );
   },

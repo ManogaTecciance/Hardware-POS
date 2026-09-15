@@ -1,6 +1,6 @@
 {
   "name": "@hardware-pos/print-agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "On-site print agent: drains the AxloPOS print queue to printers on the shop LAN.",
   "main": "dist/index.js",
@@ -12,6 +12,7 @@
     "//agent": "Deliberately NOT named `dev`: the agent is an on-site daemon, not part of the dev stack. `turbo run dev` would start it with the API and web, where it exits immediately for want of a token and takes the whole run down. Run it explicitly with `pnpm dev:agent` when testing the cloud transport.",
     "agent": "tsx src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/*.spec.ts",
     "lint": "echo \"(the agent is linted by tsc; no ESLint config needed for 2 files)\"",
     "clean": "rm -rf dist *.tsbuildinfo"
   },

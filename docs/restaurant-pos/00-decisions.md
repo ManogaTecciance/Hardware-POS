@@ -8131,6 +8131,19 @@ off or pin a default; nothing on the tab writes them any more. Every printer row
 also gained **Remove** (a real delete that unlinks stations, clears defaults and
 fails queued jobs for it).
 
+**Addendum (2026-09-15) — the API ships the agent.** An installed agent used to
+change only when someone re-ran install.cmd on that PC, so every agent-side
+fix was a visit per customer. Now the API carries the current build
+(`AgentReleaseService`: `package.json`, `dist/*.js`, `scripts/*.ps1` with sha256s,
+served behind the agent token at `GET /print-agent/release[/files/…]`) and the
+heartbeat reply names it (`latestVersion`). A behind agent fetches into `*.next`,
+verifies every byte, rename-swaps keeping `*.prev`, and exits so the service
+wrapper restarts it; a build that dies three times before its first heartbeat
+is rolled back and that version is not retried (`apps/print-agent/src/updater.ts`).
+`node.exe`, nssm and agent.json never move; `AGENT_AUTO_UPDATE=false` pins a
+shop. Proven live: the installed 0.2.0 went to 0.3.0 in six seconds and printed.
+The Dockerfile builds the agent beside the API so deploying one deploys both.
+
 ---
 
 ### D180 — merging `fix/waiter-status-change`: how each clash was decided

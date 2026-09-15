@@ -64,6 +64,25 @@ describe('PrintAgentService discovery store', () => {
   });
 });
 
+describe('PrintAgentService scan requests', () => {
+  it('a request is handed out exactly once, to its own branch only', () => {
+    const s = service();
+    expect(s.takeScanRequest('brn_a')).toBe(false);
+    s.requestScan('brn_a');
+    expect(s.takeScanRequest('brn_b')).toBe(false);
+    expect(s.takeScanRequest('brn_a')).toBe(true);
+    expect(s.takeScanRequest('brn_a')).toBe(false);
+  });
+
+  it('two presses before a heartbeat collapse into one scan', () => {
+    const s = service();
+    s.requestScan('brn_a');
+    s.requestScan('brn_a');
+    expect(s.takeScanRequest('brn_a')).toBe(true);
+    expect(s.takeScanRequest('brn_a')).toBe(false);
+  });
+});
+
 describe('HeartbeatDto', () => {
   const validate = (body: unknown) =>
     validateSync(plainToInstance(HeartbeatDto, body), { whitelist: true, forbidNonWhitelisted: true });

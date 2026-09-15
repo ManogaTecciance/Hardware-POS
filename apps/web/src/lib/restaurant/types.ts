@@ -626,6 +626,8 @@ export interface PrintAgentView {
   createdAt: string;
   /** Checked in within the freshness window — the branch prints through it. */
   online: boolean;
+  /** D183 — the agent build the API ships; the agent updates itself to it. Null when the API has none. */
+  latestVersion?: string | null;
 }
 
 export interface PrintQueueStatus {

@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AxloPOS Printer Setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #f5f7f9;
+    --paper: #ffffff;
+    --ink: #172033;
+    --muted: #5a6577;
+    --line: #d8dee6;
+    --accent: #0b7a75;
+    --accent-soft: #e3f3f2;
+    --warn: #9a5b00;
+    --warn-soft: #fdf3df;
+    --danger: #a3323d;
+    --danger-soft: #fbe9ea;
+    --code-bg: #eef1f5;
+    --shadow: 0 1px 2px rgba(23, 32, 51, 0.06);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #101620;
+      --paper: #171e2b;
+      --ink: #e7ebf1;
+      --muted: #9aa5b6;
+      --line: #2a3446;
+      --accent: #4cc3bd;
+      --accent-soft: #14312f;
+      --warn: #f2b86b;
+      --warn-soft: #33270f;
+      --danger: #f08a93;
+      --danger-soft: #3a1c20;
+      --code-bg: #0f1520;
+      --shadow: none;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #101620;
+    --paper: #171e2b;
+    --ink: #e7ebf1;
+    --muted: #9aa5b6;
+    --line: #2a3446;
+    --accent: #4cc3bd;
+    --accent-soft: #14312f;
+    --warn: #f2b86b;
+    --warn-soft: #33270f;
+    --danger: #f08a93;
+    --danger-soft: #3a1c20;
+    --code-bg: #0f1520;
+    --shadow: none;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font: 16px/1.55 "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    padding-block: 32px 64px;
+    padding-inline: 20px;
+  }
+  .page { max-width: 780px; margin: 0 auto; }
+  header.top {
+    display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px;
+    border-bottom: 2px solid var(--ink); padding-bottom: 14px; margin-bottom: 28px;
+  }
+  header.top h1 { font-size: 28px; font-weight: 600; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+  header.top .meta { font-size: 13px; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+  h2 {
+    font-size: 21px; font-weight: 600; margin: 40px 0 12px; letter-spacing: -0.005em; text-wrap: balance;
+    display: flex; align-items: center; gap: 12px;
+  }
+  h2 .num {
+    display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
+    background: var(--ink); color: var(--ground); font-size: 14px; font-weight: 600; flex: none;
+  }
+  h3 { font-size: 16px; font-weight: 600; margin: 22px 0 8px; }
+  p { margin: 0 0 12px; max-width: 68ch; }
+  .lede { font-size: 17px; color: var(--muted); max-width: 62ch; }
+  ol.steps { margin: 0 0 16px; padding-left: 0; list-style: none; counter-reset: step; display: grid; gap: 10px; }
+  ol.steps > li {
+    counter-increment: step; position: relative; padding-left: 40px; max-width: 70ch;
+  }
+  ol.steps > li::before {
+    content: counter(step); position: absolute; left: 0; top: 1px;
+    width: 26px; height: 26px; border-radius: 50%; border: 1.5px solid var(--ink);
+    display: grid; place-items: center; font-size: 13px; font-weight: 600;
+  }
+  ul.plain { margin: 0 0 12px; padding-left: 20px; max-width: 70ch; }
+  ul.plain li { margin-bottom: 6px; }
+  code, kbd {
+    font-family: "IBM Plex Mono", Consolas, "Courier New", monospace; font-size: 0.92em;
+    background: var(--code-bg); padding: 1px 6px; border-radius: 4px;
+  }
+  kbd { border: 1px solid var(--line); background: var(--paper); }
+  pre {
+    font-family: "IBM Plex Mono", Consolas, monospace; font-size: 13.5px; line-height: 1.5;
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: 12px 14px; overflow-x: auto; margin: 8px 0 16px;
+  }
+  .note {
+    border-left: 3px solid var(--accent); background: var(--accent-soft);
+    padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 12px 0 16px; max-width: 70ch;
+  }
+  .note.warn { border-color: var(--warn); background: var(--warn-soft); }
+  .note.danger { border-color: var(--danger); background: var(--danger-soft); }
+  .note strong { font-weight: 600; }
+  .card {
+    background: var(--paper); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow);
+    padding: 16px 18px; margin: 12px 0 18px;
+  }
+  .card h3 { margin-top: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 12px 0 18px; }
+  .grid .card { margin: 0; }
+  .tag {
+    display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--accent); background: var(--accent-soft); padding: 2px 8px; border-radius: 999px; margin-bottom: 8px;
+  }
+  .tablewrap { overflow-x: auto; margin: 8px 0 18px; }
+  table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  td:first-child { font-weight: 500; white-space: nowrap; }
+  .ok { color: var(--accent); font-weight: 600; }
+  .checklist { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 8px; max-width: 70ch; }
+  .checklist li { display: flex; gap: 10px; align-items: flex-start; }
+  .checklist li::before {
+    content: ""; flex: none; width: 18px; height: 18px; margin-top: 3px; border: 1.5px solid var(--ink); border-radius: 4px;
+  }
+  details.card summary { cursor: pointer; }
+  details.card summary::marker { color: var(--muted); }
+  footer { margin-top: 48px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media print {
+    body { background: #fff; color: #000; padding: 0; font-size: 12.5px; }
+    .card, pre { box-shadow: none; break-inside: avoid; }
+    h2 { break-after: avoid; }
+    a::after { content: " (" attr(href) ")"; font-size: 0.85em; color: #555; }
+    .tag { border: 1px solid #000; color: #000; background: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <h1>AxloPOS Printer Setup</h1>
+    <span class="meta">For the counter PC · Windows 10/11</span>
+  </header>
+
+  <p class="lede">How to make AxloPOS print kitchen tickets and bills at your restaurant. One small program (the <strong>print agent</strong>) runs on the counter PC and reaches your printers; everything else is done in the app.</p>
+
+  <h2><span class="num">0</span>Before you start</h2>
+  <ul class="checklist">
+    <li>The <strong>counter PC</strong> (Windows 10 or 11) is on the restaurant Wi-Fi or LAN and stays switched on during service.</li>
+    <li>You have the <strong>agent zip</strong> (<code>axlo-print-agent-0.3.0.zip</code>) — from AxloPOS support.</li>
+    <li>You can log in to AxloPOS as the <strong>owner</strong>.</li>
+    <li>Printers are unboxed, with <strong>80 mm receipt rolls</strong> (not sticker labels) loaded.</li>
+    <li>The kitchen printer's LAN cable goes into the <strong>router or switch</strong> — never into a PC.</li>
+  </ul>
+
+  <h2><span class="num">1</span>Install the print agent (5 minutes)</h2>
+  <ol class="steps">
+    <li>Unzip the agent zip anywhere — the Desktop is fine.</li>
+    <li>In AxloPOS: <strong>Settings → Printing → Print agent → Pair a new agent</strong>. Name it (for example <em>Counter PC</em>) and press <strong>Pair agent</strong>.</li>
+    <li>The box that appears shows two things: the <strong>API address</strong> and the <strong>token</strong> (starts with <code>pat_</code>). The token is shown <strong>once</strong> — keep the box open.</li>
+    <li>Double-click <strong><code>install.cmd</code></strong> in the unzipped folder. Say <strong>Yes</strong> when Windows asks for permission.</li>
+    <li>It asks for the <strong>API address</strong> — paste the one from the box (press <kbd>Enter</kbd> if the default it shows already matches). Then paste the <strong>token</strong>.</li>
+    <li>Wait for <span class="ok">Service installed and running</span> and <span class="ok">The agent reached … and scanned for printers</span>, then press <kbd>Enter</kbd> to close.</li>
+  </ol>
+  <div class="note">
+    <strong>Back in AxloPOS</strong>, the agent shows <strong>Online</strong> within a few seconds — no reload needed. The installer set everything else up: Node.js if it was missing, a Windows service that starts before anyone logs in and restarts itself, and "never sleep" on mains power.
+  </div>
+  <div class="note warn">
+    If the window ends with <strong>FAILED: …</strong>, the reason is written just above it — most often the API address was typed wrong. Run <code>install.cmd</code> again and paste the address exactly as the app shows it. Still stuck? Take a photo of the window and send it to AxloPOS support.
+  </div>
+
+  <h2><span class="num">2</span>Connect the printers</h2>
+  <p>The app addresses each printer by <em>how the counter PC reaches it</em>. Pick the kind that matches, then follow its three steps.</p>
+
+  <div class="grid">
+    <div class="card">
+      <span class="tag">Network</span>
+      <h3>Kitchen receipt printer with an IP address</h3>
+      <p>Cable to the router, or a Wi-Fi receipt printer. Tested with Xprinter XP-Q80B.</p>
+      <ol class="steps">
+        <li>Plug the LAN cable into the <strong>router</strong>, power on.</li>
+        <li>Hold <strong>FEED</strong> while switching it on: the self-test page prints its IP (Xprinter default <code>192.168.123.100</code>).</li>
+        <li>Keep that page — the app finds the printer by itself, and the IP on the page is what support will ask for. Nothing to install on the PC.</li>
+      </ol>
+    </div>
+    <div class="card">
+      <span class="tag">USB</span>
+      <h3>Bill printer plugged into the PC</h3>
+      <p>Tested with Xprinter XP-365B (dual-mode — see the note).</p>
+      <ol class="steps">
+        <li>Install the printer's Windows driver on the counter PC so it appears in <em>Printers &amp; scanners</em>.</li>
+        <li>Print a Windows test page — if that works, AxloPOS can print too.</li>
+        <li>Xprinter XP-365B only: power off → rear <strong>DIP switch 1 → OFF</strong> (receipt mode) → power on.</li>
+      </ol>
+    </div>
+    <div class="card">
+      <span class="tag">Wi-Fi / office</span>
+      <h3>Office inkjet or laser on the Wi-Fi</h3>
+      <p>Prints the ticket as a plain-text page on normal paper. Tested with Canon G3010.</p>
+      <ol class="steps">
+        <li>Connect the printer to the restaurant Wi-Fi.</li>
+        <li>Add it on the counter PC: <em>Settings → Printers &amp; scanners → Add device</em>.</li>
+        <li>Print a Windows test page.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="note danger">
+    <strong>The XP-365B label-mode trap.</strong> In label (TSPL) mode the Windows test page prints but every AxloPOS bill is silently ignored. Set DIP switch <strong>1 to OFF</strong>, switch the printer off and on, and load a continuous receipt roll.
+  </div>
+
+  <h2><span class="num">3</span>Add the printers in AxloPOS</h2>
+  <p><strong>Settings → Printing → Printers → Add printer.</strong> The agent has already found your printers — pick them from the lists instead of typing.</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Field</th><th>Kitchen printer</th><th>Bill printer</th></tr></thead>
+      <tbody>
+        <tr><td>Used for</td><td>Kitchen — prints order tickets</td><td>Cashier — prints bills</td></tr>
+        <tr><td>Name</td><td>Kitchen</td><td>Counter</td></tr>
+        <tr><td>Connection</td><td>Network — receipt printer with an IP address</td><td>USB — plugged into the PC <em>(or Wi-Fi / office printer)</em></td></tr>
+        <tr><td>Address</td><td>Click the chip marked <strong>receipt printer</strong> (e.g. <code>192.168.123.100</code>)</td><td>Choose the printer from the list (e.g. <code>Xprinter XP-365B</code>)</td></tr>
+        <tr><td>Paper</td><td>80 mm (48 characters)</td><td>80 mm (48 characters) — choose 58 mm for a narrow printer</td></tr>
+        <tr><td>Prints tickets for</td><td>Tick the stations it serves — one kitchen printer: tick all</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Each printer row has <strong>Test print</strong>. Press it: paper comes out and the row says <em>Test page printed through the agent</em>. Just plugged in a printer and it is not in the list yet? Press <strong>Scan again</strong> — it appears within about 10 seconds.</p>
+  <div class="note">
+    <strong>Nothing else to configure.</strong> Bills go to the cashier printer; a station with no printer of its own goes to the first kitchen printer. Two kitchen printers (kitchen and grill)? Add both and tick each one's stations.
+  </div>
+
+  <h2><span class="num">4</span>Prove it with one order</h2>
+  <ol class="steps">
+    <li>Place a dine-in order and send it — a <strong>kitchen ticket</strong> prints within about 3 seconds.</li>
+    <li>Settle the order — the <strong>bill</strong> prints on the counter printer.</li>
+    <li><strong>Settings → Printing → Print queue</strong> shows 0 pending, 0 failed.</li>
+  </ol>
+
+  <h2><span class="num">5</span>Every day after that</h2>
+  <ul class="plain">
+    <li><strong>Switching the PC on</strong> is enough. The agent starts with Windows, before anyone logs in, and shows Online within seconds. Nobody starts anything by hand.</li>
+    <li><strong>A new printer</strong>: install its driver (USB / Wi-Fi office) or plug it into the router (network), then Add printer in the app. The agent finds it by itself.</li>
+    <li><strong>Updates</strong> happen by themselves: when AxloPOS is updated, the agent fetches its new version, checks it, and restarts in a few seconds. No action at the restaurant.</li>
+    <li><strong>Internet drops</strong>: orders keep going to the kitchen screen; tickets print as soon as the connection returns. Nothing is lost.</li>
+    <li><strong>Power cut mid-print</strong>: that ticket prints again when power returns — twice is possible, never zero.</li>
+  </ul>
+
+  <h2><span class="num">6</span>If something does not print</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>You see</th><th>Usual cause</th><th>Do this</th></tr></thead>
+      <tbody>
+        <tr><td>Agent <strong>Offline</strong></td><td>PC off, asleep, or no internet</td><td>Switch the PC on and check it is on the Wi-Fi. Still offline after two minutes: restart the PC. Then contact support.</td></tr>
+        <tr><td>Agent <strong>never checked in</strong></td><td>Installed with the wrong API address</td><td>Run <code>install.cmd</code> again and paste the address shown in the app next to the token.</td></tr>
+        <tr><td>Network printer not in the list</td><td>Cable in a PC instead of the router; printer off</td><td>Move the cable to the router, power-cycle, press <strong>Scan again</strong>.</td></tr>
+        <tr><td>Test print says printed, no paper (USB)</td><td>XP-365B in label mode</td><td>DIP switch 1 → OFF, power off/on, receipt roll.</td></tr>
+        <tr><td>Test failed: timed out</td><td>The kitchen printer's address changed (often after the router was restarted)</td><td>Hold FEED while switching the printer on to print its new address, then in the app press <strong>Edit</strong> on that printer and pick it from the list. Ask support to make the address permanent.</td></tr>
+        <tr><td>Text runs off the edge</td><td>58 mm printer set to 80 mm</td><td><strong>Edit</strong> the printer → Paper → 58 mm.</td></tr>
+        <tr><td>Bills print, kitchen tickets do not</td><td>No kitchen printer, or it is turned off in the app</td><td>Settings → Printing: the kitchen printer must exist and be on; check its stations.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <details class="card">
+    <summary><strong>For your technician</strong> (you do not need this)</summary>
+    <p style="margin-top:10px">The agent lives in <code>C:\axlo-print-agent</code> and runs as the Windows service <code>AxloPrintAgent</code>. Its log is <code>agent.log</code> in that folder; the installer's log is <code>%TEMP%\axlo-print-agent-install.log</code>. <code>install.cmd -Uninstall</code> removes the service. Xprinter drivers and tools: <a href="https://www.xprintertech.com/download.html">xprintertech.com/download.html</a>. Moving to a new PC: install there with a new pairing token, then press <strong>Remove</strong> on the old agent in the app.</p>
+  </details>
+
+  <footer>AxloPOS · Printer setup guide · Keep this page with the counter PC. Any question: contact AxloPOS support.</footer>
+</div>
+</body>
+</html>
