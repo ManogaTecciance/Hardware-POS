@@ -138,7 +138,16 @@ const SESSION_ON_IT = {
   readyTicketIds: [],
 } as OpenSessionView;
 
-const session = { token: 't', user: { id: ME, tenantId: 'tnt_1' } } as never;
+/*
+ * The owner, as the session store actually shapes a user: the floor's
+ * permission reads go through `useAuth` (mocked above), but the my/all
+ * ownership rule (D157c/D157d) reads `role` and `permissions` off the session
+ * itself, and a fixture without them is not a session that can exist.
+ */
+const session = {
+  token: 't',
+  user: { id: ME, tenantId: 'tnt_1', role: 'OWNER', permissions: [] },
+} as never;
 
 async function settle() {
   await act(async () => {

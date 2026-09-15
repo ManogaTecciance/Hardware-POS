@@ -41,7 +41,7 @@ import {
   countMine,
   resolveOwnerScope,
   sessionsVisibleTo,
-  supervisesTheFloor,
+  servesTables,
   type SessionOwnerScope,
 } from '@/lib/restaurant/session-ownership';
 import { normalizeSearchTerm } from '@/lib/search-term';
@@ -357,11 +357,12 @@ export function TableFloor({ session, branchId, canManage }: Props) {
   /*
    * D157b — mine unless the operator said otherwise; nothing about the data
    * moves it, so there is no paint at which the answer changes under them.
-   * D157c — except that a supervisor has no "mine" worth defaulting to: the
-   * floor is their view, and they never see the chips to change it.
+   * D157c/D157d — except that anyone who does not serve tables (a supervisor,
+   * the till) has no "mine" worth defaulting to: the floor is their view, and
+   * they never see the chips to change it.
    */
-  const supervises = supervisesTheFloor(session.user.role);
-  const ownerScope = resolveOwnerScope(ownerChoice ?? (supervises ? 'all' : null));
+  const serves = servesTables(session.user);
+  const ownerScope = resolveOwnerScope(ownerChoice ?? (serves ? null : 'all'));
   /** Whether the first load has landed, so a `0` on a chip is an answer. */
   const countsKnown = status !== 'loading';
   /*
@@ -389,12 +390,12 @@ export function TableFloor({ session, branchId, canManage }: Props) {
     [snapshot.sessionsByTableId, ownerScope, currentUserId],
   );
   /*
-   * The chips are offered only to someone the server will actually answer with
+   * The chips are offered only to a waiter the server will actually answer with
    * other people's tables (D70's key, which the waiter template now carries,
    * D156). Without it every session returned is already theirs, and a pair of
    * chips that filter nothing is a control that lies about what it does.
    */
-  const canSeeWholeFloor = hasPermission(Permission.TABLE_SESSION_VIEW_ALL) && !supervises;
+  const canSeeWholeFloor = hasPermission(Permission.TABLE_SESSION_VIEW_ALL) && serves;
 
   return (
     <div className="space-y-4">

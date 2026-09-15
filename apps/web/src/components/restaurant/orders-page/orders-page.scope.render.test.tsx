@@ -29,6 +29,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { Permission } from '@/lib/permissions';
 import type { Session } from '@/lib/session-store';
 
 const replace = vi.fn();
@@ -48,7 +49,11 @@ const { OrdersPage } = await import('./orders-page');
 
 const ME = 'usr_me';
 
-/** D157c — the enum role a restaurant waiter carries; an owner is asserted below. */
+/**
+ * D157c — the enum role a restaurant waiter carries; an owner is asserted
+ * below. D157d — and the one permission that says they SERVE (the cashier
+ * shares the enum and lacks it; asserted below too).
+ */
 const SESSION = {
   token: 'tok',
   user: {
@@ -57,7 +62,7 @@ const SESSION = {
     email: 'nimal@example.test',
     role: 'CASHIER',
     tenantId: 'tnt_1',
-    permissions: [],
+    permissions: [Permission.ORDER_SEND_TO_KITCHEN],
   },
   branchId: 'brn_1',
   registerId: null,
@@ -262,6 +267,38 @@ describe('whose orders the queue shows (D157)', () => {
     expect(screen.queryByRole('group', { name: 'Whose orders to show' })).toBeNull();
     // NEGATIVE — the rows are all there, so this is the control being absent
     // rather than the queue being filtered to nothing.
+    await waitFor(() => expect(screen.getByText(/Sunil Fernando/)).toBeTruthy());
+  });
+
+  it('D157d — the CASHIER asks for the whole queue and gets no chips', async () => {
+    /*
+     * The PO's report, after D157c had deliberately kept the control for the
+     * till: "in cashier view ... can see my orders and all orders, i told you
+     * those for only waiters". Same enum role as the waiter, so this is the
+     * permission half of the rule — the restaurant Cashier template holds
+     * TAKEAWAY_CREATE (its own takeaway orders were D157c's reason) and
+     * PAYMENT_COLLECT, and not ORDER_SEND_TO_KITCHEN.
+     */
+    const CASHIER = {
+      ...SESSION,
+      user: {
+        ...(SESSION as unknown as { user: Record<string, unknown> }).user,
+        permissions: [Permission.TAKEAWAY_CREATE, Permission.PAYMENT_COLLECT],
+      },
+    } as unknown as Session;
+    list.mockResolvedValue(
+      page({ items: [MINE, THEIRS], resolvedScope: 'all', mineCount: 1, allCount: 2 }),
+    );
+
+    render(<OrdersPage session={CASHIER} branchId="brn_1" />);
+
+    await waitFor(() => expect(lastQuery()?.scope).toBe('all'));
+    expect(screen.queryByRole('button', { name: /^My orders/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^All orders/ })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Whose orders to show' })).toBeNull();
+    // NEGATIVE — every row is there: the control is absent, the queue is not
+    // narrowed. (The waiter with the same enum role gets chips — the first
+    // case in this file.)
     await waitFor(() => expect(screen.getByText(/Sunil Fernando/)).toBeTruthy());
   });
 

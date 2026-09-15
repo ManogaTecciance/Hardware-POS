@@ -1,4 +1,4 @@
-import { isAdminLevelRole, type UserRole } from '@hardware-pos/shared';
+import { isAdminLevelRole, Permission, type UserRole } from '@hardware-pos/shared';
 
 import type { OpenSessionView } from './types';
 
@@ -34,11 +34,46 @@ export type SessionOwnerScope = 'mine' | 'all';
  * point: an owner holds EVERY permission, including the waiter's, so no
  * permission can tell the two apart. `isAdminLevelRole` is the same predicate
  * the API uses for "may step past an operational guard-rail" (OWNER, ADMIN,
- * SALESPERSON). A restaurant Waiter and Cashier both carry the enum CASHIER, so
- * they keep the control — the cashier genuinely has their own takeaway orders.
+ * SALESPERSON). This is only HALF of the answer — the till is not a supervisor
+ * and does not get the control either; see {@link servesTables}.
  */
 export function supervisesTheFloor(role: UserRole): boolean {
   return isAdminLevelRole(role);
+}
+
+/**
+ * D157d — the my/all control belongs to the people who SERVE tables, and to
+ * nobody else.
+ *
+ * D157c withheld it from the office and kept it for the till, reasoning that
+ * the cashier's own takeaway orders are genuinely theirs. The PO's rule is
+ * narrower — "my orders / my tables are for waiters only" — and the till was
+ * the case that showed why: a cashier opens on "My orders", which is a list of
+ * the odd takeaway they keyed, when their whole job is every bill in the room.
+ * On the floor and the POS picker it was worse, because a cashier opens no
+ * tables at all and so opened on an EMPTY "Mine" and had to tap All before a
+ * single bill was reachable.
+ *
+ * A waiter and the restaurant cashier both carry the enum CASHIER, so the role
+ * cannot separate them here — but a permission can, because neither holds the
+ * other's. `ORDER_SEND_TO_KITCHEN` is the codebase's existing definition of
+ * "a waiter": the API's D159 assignable-waiters list is built from exactly
+ * this key, and the POS offers DINE_IN on it. The cashier, the hotel
+ * receptionist (whose desk is "the whole floor's view by definition", D70) and
+ * kitchen staff do not hold it. The role check stays in front for D157c's
+ * reason: a supervisor holds this key along with everything else.
+ *
+ * The session's permissions are the SERVER's resolved set (the role row's, not
+ * the enum's — see `auth.tsx`), which is what makes this readable client-side
+ * at all.
+ */
+export function servesTables(user: {
+  role: UserRole;
+  permissions: readonly Permission[];
+}): boolean {
+  return (
+    !supervisesTheFloor(user.role) && user.permissions.includes(Permission.ORDER_SEND_TO_KITCHEN)
+  );
 }
 
 /**

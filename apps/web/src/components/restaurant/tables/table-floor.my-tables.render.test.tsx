@@ -47,6 +47,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { Permission } from '@/lib/permissions';
 import type {
   DiningAreaView,
   OpenSessionView,
@@ -152,11 +153,35 @@ const ses = (
  * D157c — the enum role a restaurant WAITER actually carries (their authority
  * comes from the custom role row). Said explicitly because the whole my/all
  * control now depends on it: an owner-level role sees none of it.
+ * D157d — and on the serving key: the restaurant CASHIER shares the enum and
+ * lacks ORDER_SEND_TO_KITCHEN, and sees none of it either.
  */
-const session = { token: 't', user: { id: ME, tenantId: 'tnt_1', role: 'CASHIER' } } as never;
+const session = {
+  token: 't',
+  user: {
+    id: ME,
+    tenantId: 'tnt_1',
+    role: 'CASHIER',
+    permissions: [Permission.ORDER_SEND_TO_KITCHEN],
+  },
+} as never;
 const ownerSession = {
   token: 't',
-  user: { id: ME, tenantId: 'tnt_1', role: 'OWNER' },
+  user: {
+    id: ME,
+    tenantId: 'tnt_1',
+    role: 'OWNER',
+    permissions: [Permission.ORDER_SEND_TO_KITCHEN],
+  },
+} as never;
+const cashierSession = {
+  token: 't',
+  user: {
+    id: ME,
+    tenantId: 'tnt_1',
+    role: 'CASHIER',
+    permissions: [Permission.PAYMENT_COLLECT, Permission.TABLE_SESSION_VIEW_ALL],
+  },
 } as never;
 
 async function settle() {
@@ -304,6 +329,26 @@ describe('whose tables the floor shows (D156)', () => {
     expect(screen.queryByRole('button', { name: /^All tables/ })).toBeNull();
     expect(screen.queryByRole('group', { name: 'Whose tables to show' })).toBeNull();
     // The names stay (D156a) — that is how a supervisor reads the room.
+    expect(screen.getByText('Sunil')).toBeTruthy();
+    expect(screen.getByText('Nimal')).toBeTruthy();
+  });
+
+  it('D157d — the CASHIER gets the room, and no my/all chips at all', async () => {
+    /*
+     * The PO's report, after D157c had kept the control for the till: "i told
+     * you those for only waiters". Here it was worse than on the queue — a
+     * cashier opens no tables, so "My tables" was always EMPTY and every bill
+     * needed a tap on All before its order could be reached. Same enum role
+     * as the waiter case above; only the permission differs.
+     */
+    render(<TableFloor session={cashierSession} branchId="brn_1" canManage />);
+    await settle();
+
+    await waitFor(() => expect(shownSessionIds().sort()).toEqual(['mine', 'theirs']));
+    expect(screen.queryByRole('button', { name: /^My tables/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^All tables/ })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Whose tables to show' })).toBeNull();
+    // The names stay (D156a): the till reads the room by them.
     expect(screen.getByText('Sunil')).toBeTruthy();
     expect(screen.getByText('Nimal')).toBeTruthy();
   });

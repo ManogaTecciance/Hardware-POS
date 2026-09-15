@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { PAGE_SIZES, Pagination } from '@/components/ui/pagination';
 import { Select } from '@/components/ui/select';
 import { normalizeSearchTerm } from '@/lib/search-term';
-import { staffLabel, supervisesTheFloor } from '@/lib/restaurant/session-ownership';
+import { servesTables, staffLabel } from '@/lib/restaurant/session-ownership';
 import { type Session } from '@/lib/auth';
 import { restaurantOrders } from '@/lib/restaurant/api';
 import {
@@ -154,14 +154,16 @@ export function OrdersPage({ session, branchId }: Props) {
    */
   const scopeRaw = params.get('scope');
   /*
-   * D157c — a supervisor asks for the whole queue explicitly rather than
-   * letting the server's "mine" default (D157b) apply: "my orders" is a
-   * server's question, and an owner's own row is an accident of covering.
-   * They see no chips either, so the URL is the only place this can come from.
+   * D157c/D157d — anyone who does not serve tables (a supervisor, the till)
+   * asks for the whole queue explicitly rather than letting the server's
+   * "mine" default (D157b) apply: "my orders" is a waiter's question, and an
+   * owner's or a cashier's own row is an accident of covering or a stray
+   * takeaway. They see no chips either, so the URL is the only place this can
+   * come from.
    */
-  const supervises = supervisesTheFloor(session.user.role);
+  const serves = servesTables(session.user);
   const scope: 'mine' | 'all' | undefined =
-    scopeRaw === 'mine' || scopeRaw === 'all' ? scopeRaw : supervises ? 'all' : undefined;
+    scopeRaw === 'mine' || scopeRaw === 'all' ? scopeRaw : serves ? undefined : 'all';
 
   const [rows, setRows] = React.useState<UnifiedOrderView[]>([]);
   const [total, setTotal] = React.useState(0);
@@ -205,8 +207,8 @@ export function OrdersPage({ session, branchId }: Props) {
    * known any sooner.
    */
   const [appliedScope, setAppliedScope] = React.useState<'mine' | 'all'>(scope ?? 'mine');
-  /** D157c — the chips are the floor's control; the office does not get them. */
-  const showScopeChips = !supervises;
+  /** D157c/D157d — the chips are the waiter's control; the office and the till get none. */
+  const showScopeChips = serves;
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = React.useState<Date | null>(null);

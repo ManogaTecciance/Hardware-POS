@@ -24,6 +24,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { Permission } from '@/lib/permissions';
 import type {
   DiningAreaView,
   OpenTableView,
@@ -132,11 +133,35 @@ vi.mock('@/lib/restaurant/labels', () => ({
   },
 }));
 
-const session = { token: 't', user: { id: 'usr_waiter', tenantId: 'tnt', role: 'CASHIER' } } as never;
+/** D157c/D157d — a waiter: the enum CASHIER plus the key that sends a round. */
+const session = {
+  token: 't',
+  user: {
+    id: 'usr_waiter',
+    tenantId: 'tnt',
+    role: 'CASHIER',
+    permissions: [Permission.ORDER_SEND_TO_KITCHEN],
+  },
+} as never;
 /** D157c — an owner-level role: the strip opens on the room, with no chips. */
 const ownerSession = {
   token: 't',
-  user: { id: 'usr_owner', tenantId: 'tnt', role: 'OWNER' },
+  user: {
+    id: 'usr_owner',
+    tenantId: 'tnt',
+    role: 'OWNER',
+    permissions: [Permission.ORDER_SEND_TO_KITCHEN],
+  },
+} as never;
+/** D157d — the till: the waiter's enum role without the serving key. */
+const cashierSession = {
+  token: 't',
+  user: {
+    id: 'usr_cashier',
+    tenantId: 'tnt',
+    role: 'CASHIER',
+    permissions: [Permission.PAYMENT_COLLECT, Permission.TAKEAWAY_CREATE],
+  },
 } as never;
 
 afterEach(() => {
@@ -411,6 +436,37 @@ describe('D156 — whose open tables the strip lists', () => {
     );
 
     await waitFor(() => expect(stripChips()).toHaveLength(2));
+    expect(within(strip()).queryByRole('button', { name: /^Mine/ })).toBeNull();
+    expect(within(strip()).queryByRole('button', { name: /^All/ })).toBeNull();
+  });
+
+  it('D157d — the cashier opens on the room, with no chips', async () => {
+    /*
+     * "i told you those for only waiters" (PO). A cashier at the POS is there
+     * to settle whichever table asks for the bill; they open no tables, so a
+     * strip defaulted to "Mine" was an empty strip with the bills one tap
+     * further away. Same enum role as `session` above; only the permission
+     * differs, which is what D157d reads.
+     */
+    listOpenSessions.mockResolvedValue([
+      row('theirs', 'tbl_2', 'usr_other', 'Sunil'),
+      row('mine', 'tbl_4', 'usr_waiter', 'Nimal'),
+    ]);
+    render(
+      <TableSessionPanel
+        session={cashierSession}
+        branchId="br_1"
+        active={null}
+        onPick={vi.fn()}
+        onOpenBill={vi.fn()}
+        onOpenRounds={vi.fn()}
+        roundsSent={0}
+      />,
+    );
+
+    // POSITIVE — both running tables reachable at once…
+    await waitFor(() => expect(stripChips()).toHaveLength(2));
+    // …NEGATIVE — with no control that could have narrowed them.
     expect(within(strip()).queryByRole('button', { name: /^Mine/ })).toBeNull();
     expect(within(strip()).queryByRole('button', { name: /^All/ })).toBeNull();
   });

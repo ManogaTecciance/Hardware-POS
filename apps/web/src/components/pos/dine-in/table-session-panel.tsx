@@ -22,7 +22,7 @@ import {
   isMySession,
   otherWaiterLabel,
   resolveOwnerScope,
-  supervisesTheFloor,
+  servesTables,
   type SessionOwnerScope,
 } from '@/lib/restaurant/session-ownership';
 import { TABLE_STATUS_LABELS, formatElapsed } from '@/lib/restaurant/labels';
@@ -385,11 +385,13 @@ function Picker({
   );
   /*
    * D157b — mine unless the waiter said otherwise; the data never moves it.
-   * D157c — a supervisor works the whole room: the strip opens on every
-   * running table and carries no chips to narrow it.
+   * D157c/D157d — a supervisor or the till works the whole room: the strip
+   * opens on every running table and carries no chips to narrow it. For the
+   * cashier this is the difference between reaching a bill in one tap and
+   * opening on an empty "Mine" (they open no tables).
    */
-  const supervises = supervisesTheFloor(session.user.role);
-  const ownerScope = resolveOwnerScope(ownerChoice ?? (supervises ? 'all' : null));
+  const serves = servesTables(session.user);
+  const ownerScope = resolveOwnerScope(ownerChoice ?? (serves ? null : 'all'));
   const shownOpen = ownerScope === 'mine' ? mineOpen : open;
 
   /*
@@ -550,7 +552,7 @@ function Picker({
                   {/* Only when there is something to choose between: on a floor
                       where every running table is the caller's own, two chips
                       that filter nothing would be a control that lies. */}
-                  {!supervises && mineOpen.length !== open.length ? (
+                  {serves && mineOpen.length !== open.length ? (
                     <div className="flex flex-wrap gap-1.5">
                       <button
                         type="button"

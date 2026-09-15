@@ -10831,6 +10831,65 @@ chips / 20 rows; waiter → 2 chips on both, 4 tables and 2 orders in the defaul
 view. Mutation-proven: stubbing `supervisesTheFloor` to `false` fails all four
 new cases (unit, floor, queue, picker) and nothing else.
 
+### D157d — "my tables / my orders" is the waiter's control, and the till's no more than the office's
+
+**Reported by the PO, 2026-09-15**: *"in cashier view there is a bug, because
+in orders can see my orders and all orders, i told you those for only
+waiters."*
+
+**D157c drew the line in the wrong place.** It took the control away from the
+office and — on its own reasoning, not the PO's — kept it for the till: "the
+cashier's own takeaway orders genuinely are theirs". They are, and it does not
+matter. The PO's rule was already "for waiters only", and the cashier is not a
+waiter: their job is every bill in the room, so a queue that opens on the two
+takeaways they keyed is a queue that hides the room. On the floor plan and the
+POS picker it was worse still — a cashier opens no tables, so "My tables" was
+EMPTY by construction and every bill sat one tap behind the All chip, in the
+exact state D157b decided was better than a moving default. Better than a
+moving default; not better than the right one.
+
+**The rule.** `servesTables(user)` in `lib/restaurant/session-ownership.ts`:
+not a supervisor (D157c's `supervisesTheFloor`, unchanged) AND holding
+`ORDER_SEND_TO_KITCHEN`. The three screens read it in place of the D157c
+predicate; nothing else changes shape. For anyone it says no to, the floor,
+the picker and the queue open on the whole branch and render no chips — the
+queue asking for `scope=all` explicitly, as D157c already had it do for a
+supervisor.
+
+**Why that key.** A restaurant Waiter and the restaurant Cashier both carry
+the enum `CASHIER` (D157c), so for the first time the role cannot answer — but
+a permission can, because here neither holds the other's. `ORDER_SEND_TO_KITCHEN`
+is already this codebase's definition of "a waiter": D159's assignable-waiters
+list is built from exactly that key on the role rows, and the POS offers
+DINE_IN on it. It picks out the Waiter template alone among the operational
+roles: the restaurant Cashier settles bills, the hotel Receptionist opens
+tables at check-in but sends nothing to a kitchen (and "the desk is the whole
+floor's view by definition", D70), kitchen staff hold no floor key at all. It
+is deliberately NOT `TABLE_OPEN` (the receptionist holds it) and NOT the
+absence of `PAYMENT_COLLECT` (a tenant may well let a waiter settle). The role
+check stays in front for D157c's reason: an owner holds this key with every
+other.
+
+**Read off the session's resolved permissions**, which are the role row's, not
+the enum's (the store stopped re-deriving them from the enum in D88). A session
+minted before that fix falls back to the enum's set and reads as "does not
+serve" — which errs on the side of the whole room, the safer of the two.
+
+**Verified** by the suite rather than live this time: the four D157c specs
+each gain a cashier case built as the same enum role with the serving key
+absent (the queue's with `TAKEAWAY_CREATE` present on purpose — it is the
+permission D157c leaned on, and it must not count). Mutation-proven: the
+permission read dropped from `servesTables` fails exactly those five cases
+(unit ×2, floor, queue, picker) and every D157c owner case still passes —
+i.e. the role half alone is precisely the state the PO reported. One D159
+fixture shipped a session with no role and no permissions; it now carries an
+owner's, since a session without them cannot exist (D30: a fixture must
+represent the real structure).
+
+**Unchanged:** attribution (D157's `staffUserId`/`staffName`, the served-by
+names of D156a), the server's default and counts (D157b), the queue's
+permissions, and everything about what each role may *do*.
+
 ### D159b — the Change control is a chip, in the brand pair that survives dark
 
 **Reported by the PO, 2026-09-10**: *"In waiter change button, Change text color

@@ -8,6 +8,7 @@
  * cashier — who owns no sessions — on an empty screen that looks exactly like a
  * branch with nobody in it.
  */
+import { Permission, type UserRole } from '@hardware-pos/shared';
 import { describe, expect, it } from 'vitest';
 
 import type { OpenSessionView } from './types';
@@ -17,6 +18,7 @@ import {
   isMySession,
   otherWaiterLabel,
   resolveOwnerScope,
+  servesTables,
   sessionsVisibleTo,
   supervisesTheFloor,
 } from './session-ownership';
@@ -89,12 +91,70 @@ describe('supervisesTheFloor (D157c)', () => {
      * NEGATIVE, and the reason this is a role test rather than a permission
      * test: a restaurant Waiter AND the restaurant Cashier both carry the enum
      * CASHIER (their real authority is a custom role row), and the owner holds
-     * every permission including theirs — so no permission could tell the two
-     * apart. The cashier keeps the control deliberately: their own takeaway
-     * orders are genuinely theirs.
+     * every permission including theirs — so no permission could tell the
+     * owner from either. Telling the waiter from the cashier is D157d's job,
+     * below.
      */
     expect(supervisesTheFloor('CASHIER')).toBe(false);
     expect(supervisesTheFloor('MANAGER')).toBe(false);
+  });
+});
+
+describe('servesTables (D157d)', () => {
+  /*
+   * Mutation-proven: with the permission read dropped (`return
+   * !supervisesTheFloor(user.role)`), the two cases below fail together with
+   * the D157d case in each of the three render specs (floor, queue, picker) —
+   * 5 failed, 51 passed — and every D157c owner case still passes, which is
+   * the point: the role half alone is exactly the state the PO reported.
+   *
+   * The two people who share the enum CASHIER inside a restaurant, as the
+   * server resolves them: the Waiter template carries ORDER_SEND_TO_KITCHEN,
+   * the restaurant Cashier template does not (it settles bills). Only the
+   * permission the rule reads is listed — the templates' full sets are pinned
+   * by their own parity spec, and restating them here would let this pass on
+   * a coincidence.
+   */
+  const waiter = { role: 'CASHIER' as UserRole, permissions: [Permission.ORDER_SEND_TO_KITCHEN] };
+  const cashier = {
+    role: 'CASHIER' as UserRole,
+    permissions: [Permission.PAYMENT_COLLECT, Permission.TAKEAWAY_CREATE],
+  };
+
+  it('is the waiter: same enum role as the till, told apart by the key that sends a round', () => {
+    // POSITIVE — the control belongs to whoever serves.
+    expect(servesTables(waiter)).toBe(true);
+    /*
+     * NEGATIVE — the PO's report: "in cashier view ... can see my orders and
+     * all orders, i told you those for only waiters". The till's own takeaway
+     * orders do not make it a server; its job is every bill in the room.
+     * TAKEAWAY_CREATE is included on purpose — it is the permission D157c
+     * leaned on to keep the chips for the cashier, and it must not count.
+     */
+    expect(servesTables(cashier)).toBe(false);
+  });
+
+  it('never grants the control to a supervisor, however many keys they hold', () => {
+    /*
+     * The owner holds ORDER_SEND_TO_KITCHEN along with everything else, so a
+     * permission read alone would hand the office the control D157c took
+     * away. The role check has to sit in front.
+     */
+    for (const role of ['OWNER', 'ADMIN', 'SALESPERSON'] as UserRole[]) {
+      expect(servesTables({ role, permissions: [Permission.ORDER_SEND_TO_KITCHEN] })).toBe(false);
+    }
+  });
+
+  it('reads the resolved permissions, not the enum', () => {
+    /*
+     * A non-supervisor enum with no serving key — the shape of a stale session
+     * that fell back to the enum's set, or of the hotel receptionist (opens
+     * tables at check-in, sends nothing to a kitchen; "the desk is the whole
+     * floor's view by definition", D70). Neither gets the control.
+     */
+    const desk = { role: 'CASHIER' as UserRole, permissions: [Permission.TABLE_OPEN] };
+    expect(servesTables(desk)).toBe(false);
+    expect(servesTables({ role: 'MANAGER' as UserRole, permissions: [] })).toBe(false);
   });
 });
 
