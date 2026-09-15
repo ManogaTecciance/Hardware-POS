@@ -7695,6 +7695,72 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D199 — a no-show is a fact about a time that has passed
+
+**Status:** accepted and **built**, 2026-09-15. Reservations only. No schema
+change, no migration; one new error code, one shared constant.
+
+### What was asked
+
+> "in calander we can cancel the reservation if they are no show. but now it
+> can anytime it can't be right?"
+
+### What was wrong
+
+The manage dialog offered **No-show** and **Cancel reservation** side by side
+on every BOOKED reservation from the moment it was made, and
+`ReservationsService.setStatus` accepted `BOOKED → NO_SHOW` at any time. So an
+8 pm party could be recorded as a no-show at 3 pm — a statistic about a guest
+who had not yet had the chance to arrive.
+
+### The two verbs, and when each is honest
+
+| Verb | Means | Available |
+|---|---|---|
+| Cancel reservation | the booking is withdrawn (guest called, or the house released it) | any time |
+| No-show | the guest did not turn up | once the booked start **plus fifteen minutes** has passed |
+
+That is how OpenTable, Resy and Toast Tables read it: cancel is always there,
+no-show appears after the reservation time and a short hold. The fifteen
+minutes are the conventional hold and the same grace this system has applied
+to walk-up bookings since D47 — deliberately one number, and deliberately not
+a tenant setting.
+
+### The decision
+
+- **Server:** `setStatus` refuses `NO_SHOW` before `startAt + 15 min` with
+  `RESERVATION_NO_SHOW_TOO_EARLY` (400), naming the first instant it becomes
+  legal. Every other transition is unchanged; a future booking cancels exactly
+  as before.
+- **Client:** the manage dialog renders No-show only once that instant has
+  passed — ABSENT rather than disabled — and until then says *"No-show can be
+  recorded from 20:15. Until then, cancel the reservation if the guest is not
+  coming."* Re-checked on a 30 s tick while the dialog is open, because the
+  host who opens it at 20:10 is standing there for exactly the minutes the
+  rule is about.
+- **One constant.** `RESERVATION_GRACE_MS`, `noShowAvailableFrom` and
+  `canMarkNoShow` live in `@hardware-pos/shared` (`reservations.ts`); the
+  service's `PAST_GRACE_MS` and the booking form's mirror now read it by
+  reference instead of each restating fifteen minutes.
+
+### Assertions changed, deliberately
+
+D16 forbids editing behavioural assertions for a refactor. This is a policy
+change with this record behind it, and the assertion was made stronger:
+`allows BOOKED → NO_SHOW` sat in a table on a row booked 24 hours AHEAD. It now
+stands as three cases — refused two hours ahead (with the code, and no write),
+refused ten minutes in (late is not absent), allowed at twenty minutes — with
+`BOOKED → CANCELLED` kept on the future booking as the control.
+
+### Verified
+
+API `reservations.service.spec.ts` (24), web
+`reservation-calendar.no-show.render.test.tsx` (3, clock pinned to noon so a
+booking "two hours ahead" always lands inside opening hours). Mutation-proven:
+`noShowReady` forced true → the two "not yet" cases fail; the grace dropped
+from the shared rule → only the "inside the grace" case fails, which is the
+case that exists to catch exactly that.
+
 ### D198 — the restaurant till OFFERS a buy-X-get-Y reward, and the guest may decline
 
 **Status:** accepted and **built**, 2026-09-15. Restaurant POS only (counter,

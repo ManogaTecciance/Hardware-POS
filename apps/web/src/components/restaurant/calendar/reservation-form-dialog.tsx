@@ -1,6 +1,8 @@
 'use client';
 
 import * as React from 'react';
+
+import { RESERVATION_GRACE_MS } from '@hardware-pos/shared';
 import { Minus, Plus } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -56,12 +58,13 @@ const NOTES_MAX = 500;
 const PARTY_MAX = 200;
 
 /**
- * Mirrors the server's PAST_GRACE_MS: a host typing in a walk-up party that
- * arrived five minutes ago is recording reality, not booking the past. The
- * client blocks what the server would refuse, with a reason, instead of
- * letting the whole form be filled and failed at submit.
+ * The server's PAST_GRACE_MS, by reference (D199 moved it to `shared`): a host
+ * typing in a walk-up party that arrived five minutes ago is recording
+ * reality, not booking the past. The client blocks what the server would
+ * refuse, with a reason, instead of letting the whole form be filled and
+ * failed at submit.
  */
-const PAST_GRACE_MS = 15 * 60_000;
+const PAST_GRACE_MS = RESERVATION_GRACE_MS;
 
 /** The chart's rendering granularity; the time dropdown offers the same steps. */
 const SLOT_STEP_MINUTES = 30;

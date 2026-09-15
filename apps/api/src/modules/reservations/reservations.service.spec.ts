@@ -2,6 +2,7 @@ import { ReservationsService } from './reservations.service';
 import {
   InvalidListWindowError,
   ReservationInPastError,
+  ReservationNoShowTooEarlyError,
   ReservationNotFoundError,
   ReservationOverlapError,
   ReservationStatusConflictError,
@@ -216,11 +217,57 @@ describe('ReservationsService', () => {
     it.each([
       ['BOOKED', 'SEATED'],
       ['BOOKED', 'CANCELLED'],
-      ['BOOKED', 'NO_SHOW'],
       ['SEATED', 'COMPLETED'],
     ] as const)('allows %s → %s', async (from, to) => {
       const { service } = build({ reservation: { ...baseRow(), status: from } });
       await expect(service.setStatus(TENANT, 'rsv_1', to)).resolves.toMatchObject({ status: to });
+    });
+
+    /*
+     * D199 — BOOKED → NO_SHOW used to sit in the table above, on a row booked
+     * 24 hours AHEAD: the transition was legal at any time. It is now legal
+     * only once the booked start plus the grace has passed. Asserted at both
+     * edges of the same rule so a gate that never opened (or never closed)
+     * cannot pass; the CANCELLED row above stays on the future booking, which
+     * is the verb that remains available there.
+     */
+    it('refuses a no-show ahead of the booked time, with the code, writing nothing', async () => {
+      const { service, calls } = build({
+        reservation: { ...baseRow(), status: 'BOOKED', startAt: hoursFromNow(2) },
+      });
+      await expect(service.setStatus(TENANT, 'rsv_1', 'NO_SHOW')).rejects.toThrow(
+        ReservationNoShowTooEarlyError,
+      );
+      await expect(service.setStatus(TENANT, 'rsv_1', 'NO_SHOW')).rejects.toMatchObject({
+        response: { code: 'RESERVATION_NO_SHOW_TOO_EARLY' },
+      });
+      expect(calls.update).toHaveLength(0);
+    });
+
+    it('refuses a no-show INSIDE the grace, and allows it once the grace has run', async () => {
+      // Booked 10 minutes ago: the guest is late, not absent.
+      const inGrace = build({
+        reservation: { ...baseRow(), status: 'BOOKED', startAt: hoursFromNow(-10 / 60) },
+      });
+      await expect(inGrace.service.setStatus(TENANT, 'rsv_1', 'NO_SHOW')).rejects.toThrow(
+        ReservationNoShowTooEarlyError,
+      );
+      // Booked 20 minutes ago: past the fifteen, the verb is honest.
+      const past = build({
+        reservation: { ...baseRow(), status: 'BOOKED', startAt: hoursFromNow(-20 / 60) },
+      });
+      await expect(past.service.setStatus(TENANT, 'rsv_1', 'NO_SHOW')).resolves.toMatchObject({
+        status: 'NO_SHOW',
+      });
+    });
+
+    it('a future booking can still be cancelled — that is the verb for it', async () => {
+      const { service } = build({
+        reservation: { ...baseRow(), status: 'BOOKED', startAt: hoursFromNow(2) },
+      });
+      await expect(service.setStatus(TENANT, 'rsv_1', 'CANCELLED')).resolves.toMatchObject({
+        status: 'CANCELLED',
+      });
     });
 
     it.each([

@@ -3,6 +3,8 @@
 import * as React from 'react';
 import { ChevronLeft, ChevronRight, Plus, RefreshCw } from 'lucide-react';
 
+import { canMarkNoShow, noShowAvailableFrom } from '@hardware-pos/shared';
+
 import { AreaChip } from '@/components/restaurant/area-chip';
 import {
   ReservationFormDialog,
@@ -645,6 +647,22 @@ function ManageReservationDialog({
   const table = tables.find((t) => t.id === reservation.tableId);
   const isActive = reservation.status === 'BOOKED' || reservation.status === 'SEATED';
 
+  /*
+   * D199 — "No-show" is a verb for a time that has passed. Until the booked
+   * start plus the grace, the button is ABSENT (not disabled: a control that
+   * cannot be used is a control that lies about what it does) and a line says
+   * when it arrives. Re-asked on a tick, because a host who opens the dialog
+   * at 20:10 for a 20:00 booking is standing there for exactly the minutes
+   * this rule is about.
+   */
+  const [now, setNow] = React.useState(() => Date.now());
+  const noShowReady = canMarkNoShow(reservation.startAt, now);
+  React.useEffect(() => {
+    if (reservation.status !== 'BOOKED' || noShowReady) return;
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, [reservation.status, noShowReady]);
+
   const transition = async (status: ReservationStatus) => {
     if (busy) return;
     setBusy(status);
@@ -736,14 +754,16 @@ function ManageReservationDialog({
           <div className="flex flex-wrap gap-2 border-t border-border pt-3">
             {reservation.status === 'BOOKED' ? (
               <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void transition('NO_SHOW')}
-                  isLoading={busy === 'NO_SHOW'}
-                >
-                  No-show
-                </Button>
+                {noShowReady ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void transition('NO_SHOW')}
+                    isLoading={busy === 'NO_SHOW'}
+                  >
+                    No-show
+                  </Button>
+                ) : null}
                 <Button
                   variant="outline"
                   size="sm"
@@ -753,6 +773,13 @@ function ManageReservationDialog({
                 >
                   Cancel reservation
                 </Button>
+                {!noShowReady ? (
+                  <p className="basis-full text-xs text-muted-foreground">
+                    No-show can be recorded from{' '}
+                    {formatTime(noShowAvailableFrom(reservation.startAt).toISOString())}. Until
+                    then, cancel the reservation if the guest is not coming.
+                  </p>
+                ) : null}
               </>
             ) : (
               <Button

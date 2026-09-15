@@ -19,6 +19,7 @@ export * from './tax-breakdown.js';
 export * from './variant-price-display.js';
 export * from './promotions/index.js';
 export * from './quotations.js';
+export * from './reservations.js';
 export * from './types/index.js';
 export * from './domains/index.js';
 export * from './catalogue/index.js';

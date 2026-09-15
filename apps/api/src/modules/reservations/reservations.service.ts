@@ -3,6 +3,8 @@ import { Prisma, ReservationStatus } from '@hardware-pos/database';
 
 import { nextDocumentNumber, padSequence } from '../../common/document-sequence';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RESERVATION_GRACE_MS, canMarkNoShow, noShowAvailableFrom } from '@hardware-pos/shared';
+
 import { CreateReservationDto, UpdateReservationDto } from './dto/reservations.dto';
 import {
   BranchNotFoundError,
@@ -10,6 +12,7 @@ import {
   ReservationInPastError,
   ReservationNotFoundError,
   ReservationOverlapError,
+  ReservationNoShowTooEarlyError,
   ReservationStatusConflictError,
   TableNotFoundError,
 } from './reservations.errors';
@@ -60,8 +63,11 @@ const STATUS_TRANSITIONS: Record<ReservationStatus, readonly ReservationStatus[]
 /**
  * Grace behind "now" for new bookings. A host typing in a walk-up party that
  * arrived five minutes ago is recording reality, not booking the past.
+ *
+ * D199 — the SAME fifteen minutes gate the no-show verb, read from the shared
+ * constant so the host stand, the booking rule and this one cannot drift.
  */
-const PAST_GRACE_MS = 15 * 60 * 1000;
+const PAST_GRACE_MS = RESERVATION_GRACE_MS;
 
 @Injectable()
 export class ReservationsService {
@@ -192,6 +198,16 @@ export class ReservationsService {
       if (!existing) throw new ReservationNotFoundError();
       if (!STATUS_TRANSITIONS[existing.status].includes(status)) {
         throw new ReservationStatusConflictError(existing.status, status);
+      }
+      /*
+       * D199 — a no-show is a fact about a time that has passed. Before the
+       * booked start plus the grace, the guest has simply not arrived YET, and
+       * the honest verb for withdrawing the booking is Cancel. The client hides
+       * the button on the same rule (D31: hiding is usability; this is the
+       * authority).
+       */
+      if (status === 'NO_SHOW' && !canMarkNoShow(existing.startAt)) {
+        throw new ReservationNoShowTooEarlyError(noShowAvailableFrom(existing.startAt));
       }
       // Un-seating re-opens the slot claim, so it must not have been given
       // away in the meantime — re-run the overlap check like any move.
