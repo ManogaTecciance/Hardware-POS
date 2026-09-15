@@ -138,6 +138,22 @@ afterEach(() => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('the upgraded sections', () => {
+  it('D201 — is titled by the RO- number, with no call tag anywhere', async () => {
+    render(
+      <OrderDetailDrawer
+        order={{ ...ROW, callNumber: 47 }}
+        branchId="brn_1"
+        onClose={() => undefined}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText('Subtotal')).toBeTruthy());
+    // POSITIVE — the permanent number is on the sheet (title and summary row)…
+    expect(screen.getAllByText('#RO-000028').length).toBeGreaterThanOrEqual(1);
+    // …NEGATIVE — D197's "#47" is nowhere: "keep RO, remove # numbers".
+    expect(screen.queryByText(/#47/)).toBeNull();
+  });
+
   it('prices the lines and breaks the money down once the detail lands', async () => {
     render(<OrderDetailDrawer order={ROW} branchId="brn_1" onClose={() => undefined} />);
 

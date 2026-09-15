@@ -1,20 +1,33 @@
 'use client';
 
-import { orderCallTag } from '@hardware-pos/shared';
-import { Check, ChefHat, Clock, ListTree, Printer, RotateCcw, UtensilsCrossed } from 'lucide-react';
+import {
+  Check,
+  ChefHat,
+  Clock,
+  ListTree,
+  Printer,
+  RotateCcw,
+  Search,
+  UtensilsCrossed,
+  X,
+} from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
+
+import { orderPermanentTag } from '@hardware-pos/shared';
 
 import { StatusBadge } from '@/components/restaurant/status-badge';
 import { TicketOrderDialog } from '@/components/restaurant/kitchen/ticket-order-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ChipRow } from '@/components/ui/chip-row';
+import { Input } from '@/components/ui/input';
 import { useAuth, type Session } from '@/lib/auth';
 import { Permission } from '@/lib/permissions';
 import { kitchen, kitchenStations } from '@/lib/restaurant/api';
 import { printKitchenTicket } from '@/lib/restaurant/kot-print';
 import { playNewOrderChime } from '@/lib/restaurant/new-order-chime';
+import { normalizeSearchTerm } from '@/lib/search-term';
 import {
   KITCHEN_TICKET_STATUS_LABELS,
   KITCHEN_TICKET_STATUS_TONES,
@@ -182,6 +195,22 @@ export function KitchenBoard({ session, branchId }: Props) {
    */
   const [stations, setStations] = React.useState<KitchenStationView[]>([]);
   const [stationId, setStationId] = React.useState<string | null>(null);
+  /*
+   * D200 — the search. Resolved on the SERVER, like the history's (D142): the
+   * board reads one lane at a time and a client-side match over that lane
+   * would report "no tickets" for a ticket sitting on the other one, and the
+   * counts would go on describing the unsearched pass. `search` is the
+   * keystrokes; `term` is what the poll sends, debounced and normalised
+   * (two spaces typed into "rice  curry" would otherwise match nothing).
+   * Deliberately not remembered across a reload the way the station is: a
+   * search is a lookup, a station is where the screen is mounted.
+   */
+  const [search, setSearch] = React.useState('');
+  const [term, setTerm] = React.useState('');
+  React.useEffect(() => {
+    const id = window.setTimeout(() => setTerm(normalizeSearchTerm(search)), 250);
+    return () => window.clearTimeout(id);
+  }, [search]);
   const stationStorageKey = `kitchen.stationFilter.${branchId}`;
 
   /*
@@ -281,7 +310,11 @@ export function KitchenBoard({ session, branchId }: Props) {
      * seen, which is a change of view, not an arrival. Re-baseline instead of
      * ringing.
      */
-    const chimeKey = `${fetchFilter}|${stationId ?? 'ALL'}`;
+    // D200 — and the term, for the same reason as the station: a search is a
+    // change of view, and the tickets it reveals are not arrivals. While one
+    // is typed the chime hears only matching work, exactly as a station cut
+    // hears only its station.
+    const chimeKey = `${fetchFilter}|${stationId ?? 'ALL'}|${term}`;
     try {
       /*
        * D154 — ONE request per tick on an unfiltered board. The lane counts
@@ -309,9 +342,18 @@ export function KitchenBoard({ session, branchId }: Props) {
        * read. One failure fails the tick: a banner over five-second-old
        * numbers, exactly as D154 handles a failed list read.
        */
+      /*
+       * D200 — the term rides as an extra argument ONLY while one is set. The
+       * D174 specs pin "three arguments" on the list read as the proof that
+       * the board never asks the server to station-cut its list (the strip
+       * below counts every station from it); an always-present options
+       * object would blur that proof for nothing.
+       */
       const [next, stationLanes] = await Promise.all([
-        kitchen.listTickets(session, branchId, fetchFilter),
-        stationId ? kitchen.laneCounts(session, branchId, stationId) : null,
+        kitchen.listTickets(session, branchId, fetchFilter, ...(term ? [{ search: term }] : [])),
+        stationId
+          ? kitchen.laneCounts(session, branchId, stationId, ...(term ? [term] : []))
+          : null,
       ]);
       setTickets(next.items);
       setCounts({ stationId, lanes: stationLanes ?? next.counts });
@@ -358,7 +400,7 @@ export function KitchenBoard({ session, branchId }: Props) {
         cur === 'loading' || loadedFetch.current !== fetchFilter ? 'error' : cur,
       );
     }
-  }, [session, branchId, filter, stationId]);
+  }, [session, branchId, filter, stationId, term]);
 
   React.useEffect(() => {
     void load();
@@ -591,6 +633,36 @@ export function KitchenBoard({ session, branchId }: Props) {
         )}
       </div>
 
+      {/* D200 — the same box the history has, over the same three legs; the
+          server answers, the poll keeps sending it, and the chips count the
+          matches. Its own row so the lane chips keep their width on a wall
+          tablet. */}
+      <div className="relative w-full max-w-md">
+        <Search
+          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search ticket, order, #call, or dish…"
+          // The server refuses a longer term with a 400 (D142's DTO bound).
+          maxLength={120}
+          aria-label="Search kitchen tickets"
+          className="h-11 pl-10 pr-10"
+        />
+        {search ? (
+          <button
+            type="button"
+            aria-label="Clear search"
+            onClick={() => setSearch('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
+
       {/*
        * D152 — only worth a strip when there is a routing decision to make.
        * One station means every ticket is already this screen's, and a lone
@@ -657,7 +729,21 @@ export function KitchenBoard({ session, branchId }: Props) {
             {/* D152 — naming the station matters more than the lane copy here:
                 an empty board is otherwise indistinguishable from a filter the
                 cook forgot they left on. */}
-            {selectedStationName ? (
+            {term ? (
+              // D200 — a search that found nothing must say so, or an empty
+              // lane reads as an empty kitchen; the way out is one tap.
+              <>
+                No tickets match &ldquo;{term}&rdquo;
+                {selectedStationName ? ` for ${selectedStationName}` : ''} on this lane.{' '}
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-foreground"
+                  onClick={() => setSearch('')}
+                >
+                  Show every ticket
+                </button>
+              </>
+            ) : selectedStationName ? (
               <>
                 Nothing for {selectedStationName} on this lane.{' '}
                 <button
@@ -774,8 +860,10 @@ function TicketCard({
    * takeaway before its order number lands carries neither part, which is why
    * an empty line is dropped instead of printed.
    */
-  // D197 — the call tag ("#47"), which is what the pass says at handover.
-  const provenance = [orderCallTag(ticket), ticket.waiterName].filter(Boolean).join(' · ');
+  // D201 — the permanent RO- number. D197 had put the call tag ("#47") here;
+  // the PO reversed that for the kitchen: the pass reads the order number, and
+  // the call-out stays on the KOT paper and the POS where the guest hears it.
+  const provenance = [orderPermanentTag(ticket), ticket.waiterName].filter(Boolean).join(' · ');
   /*
    * D152 — a ticket cut during the D147 window was routed to no station at all
    * and carries no name for one. The band still earns its place on those: the

@@ -1,9 +1,10 @@
 'use client';
 
-import { orderCallTag } from '@hardware-pos/shared';
 import { Filter, RefreshCw, Search, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import * as React from 'react';
+
+import { orderPermanentTag } from '@hardware-pos/shared';
 
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/restaurant/status-badge';
@@ -802,13 +803,13 @@ export function OrdersPage({ session, branchId }: Props) {
                     onClick={() => patch({ open: r.id })}
                     className="text-base font-bold after:absolute after:inset-0 after:content-[''] focus-visible:outline-none"
                   >
-                    {orderCallTag(r)}
+                    {/* D201 — the permanent number IS the name here. D197 had
+                      led with the call tag ("#47") and kept the RO- muted
+                      beside it; the PO reversed that for the queue and the
+                      kitchen: "keep RO, remove # numbers". The call number
+                      stays where the guest is told it (POS, KOT paper, bill). */}
+                  {orderPermanentTag(r)}
                   </button>
-                  {r.callNumber !== null ? (
-                    <span className="ml-2 text-xs text-muted-foreground" data-testid="order-permanent-number">
-                      {r.orderNumber}
-                    </span>
-                  ) : null}
                   <p className="text-sm">{r.contextLabel ?? r.customerName ?? '—'}</p>
                 </div>
                 <div className="flex flex-col items-end gap-1">

@@ -243,6 +243,18 @@ describe('what the screen shows', () => {
     expect(stationOn(row)).toBe('Hot line');
   });
 
+  it('D201 — names a call-numbered ticket by its RO- number, with no call tag', async () => {
+    history.mockResolvedValue(page([ticket({ callNumber: 47 })]));
+    render(<KitchenHistory session={SESSION} branchId="brn_1" />);
+
+    await waitFor(() => expect(screen.getByText('K-000123')).toBeTruthy());
+    const row = screen.getByText('K-000123').closest('tr')! as HTMLElement;
+    // POSITIVE — the permanent number, and the send beside it as before…
+    expect(within(row).getByText(/^#O-000045 · 2nd send$/)).toBeTruthy();
+    // …NEGATIVE — D197's "#47" is not on the row ("keep RO, remove # numbers").
+    expect(within(row).queryByText(/#47/)).toBeNull();
+  });
+
   /*
    * D150 rewrote this claim. The empty state used to read "No tickets have been
    * finished in this branch yet", which was true only while the list was

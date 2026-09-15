@@ -1,8 +1,9 @@
 'use client';
 
-import { orderFullRef } from '@hardware-pos/shared';
 import { Filter, Search, X } from 'lucide-react';
 import * as React from 'react';
+
+import { orderPermanentTag } from '@hardware-pos/shared';
 
 import { StatusBadge } from '@/components/restaurant/status-badge';
 import { TicketOrderDialog } from '@/components/restaurant/kitchen/ticket-order-dialog';
@@ -537,7 +538,9 @@ export function KitchenHistory({ session, branchId }: Props) {
                     <td className="px-4 py-3">
                       <div>{t.placeLabel ?? '—'}</div>
                       <div className="text-xs text-muted-foreground">
-                        {orderFullRef(t) ?? '—'}
+                        {/* D201 — the RO- number alone; D197's "#47 · RO-…"
+                            lost its call tag at the PO's request. */}
+                        {orderPermanentTag(t) ?? '—'}
                         {t.roundNumber !== null ? ` · ${sendLabel(t.roundNumber)}` : ''}
                       </div>
                     </td>

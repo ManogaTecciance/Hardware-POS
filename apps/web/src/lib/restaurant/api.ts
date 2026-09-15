@@ -780,17 +780,26 @@ export const kitchen = {
      * which is the server's reckoning and not the browser's.
      */
     status?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'COMPLETED_TODAY' | 'ALL',
-    /**
-     * D174 — scopes BOTH `items` and `counts` to one station. Omitted, the
-     * read is the whole branch, exactly as before D174. A D147-window ticket
-     * belongs to no station, so it is in no station's read and only in the
-     * unscoped one.
-     */
-    stationId?: string,
+    options?: {
+      /**
+       * D174 — scopes BOTH `items` and `counts` to one station. Omitted, the
+       * read is the whole branch, exactly as before D174. A D147-window ticket
+       * belongs to no station, so it is in no station's read and only in the
+       * unscoped one.
+       */
+      stationId?: string;
+      /**
+       * D200 — the board's search, resolved on the server over the same three
+       * legs the history searches (ticket, order or call number, dish). It
+       * narrows `items` AND `counts` together, the way a station does.
+       */
+      search?: string;
+    },
   ) {
     const params = new URLSearchParams();
     if (status && status !== 'ALL') params.set('status', status);
-    if (stationId) params.set('stationId', stationId);
+    if (options?.stationId) params.set('stationId', options.stationId);
+    if (options?.search) params.set('search', options.search);
     const qs = params.toString();
     return api.get<KitchenTicketListResult>(
       `/restaurant/branches/${branchId}/kitchen-tickets${qs ? `?${qs}` : ''}`,
@@ -813,10 +822,15 @@ export const kitchen = {
    * the two routes answer the same question with the same clause (D174 pins
    * them to each other server-side).
    */
-  laneCounts(session: Session, branchId: string, stationId?: string) {
-    const query = stationId ? `?stationId=${encodeURIComponent(stationId)}` : '';
+  laneCounts(session: Session, branchId: string, stationId?: string, search?: string) {
+    const params = new URLSearchParams();
+    if (stationId) params.set('stationId', stationId);
+    // D200 — the same term the list was read with, so a station-cut board's
+    // chips count what its cards show.
+    if (search) params.set('search', search);
+    const qs = params.toString();
     return api.get<KitchenLaneCounts>(
-      `/restaurant/branches/${branchId}/kitchen-tickets/counts${query}`,
+      `/restaurant/branches/${branchId}/kitchen-tickets/counts${qs ? `?${qs}` : ''}`,
       auth(session),
     );
   },

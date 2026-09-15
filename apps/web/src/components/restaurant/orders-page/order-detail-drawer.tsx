@@ -1,9 +1,10 @@
 'use client';
 
-import { orderCallTag, orderFullRef } from '@hardware-pos/shared';
 import { Ban, PackageCheck, Receipt, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
+
+import { orderPermanentTag } from '@hardware-pos/shared';
 
 import { BillDialog } from '@/components/restaurant/billing/bill-dialog';
 import { StatusBadge } from '@/components/restaurant/status-badge';
@@ -98,8 +99,9 @@ export function OrderDetailDrawer({
   }, [onClose, isPortrait]);
 
   if (isPortrait) {
+    // D201 — the permanent RO- number names the order on the queue's screens.
     return (
-      <Sheet open onClose={onClose} height="full" title={orderFullRef(order) ?? ''}>
+      <Sheet open onClose={onClose} height="full" title={orderPermanentTag(order) ?? ''}>
         <OrderDetailBody order={order} detail={detail} onClose={onClose} onMutated={onMutated} />
       </Sheet>
     );
@@ -117,11 +119,9 @@ export function OrderDetailDrawer({
         <div className="flex items-start gap-3 border-b border-border p-4">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              {/* D197 — "#47" leads; the RO- identifier follows, muted. */}
-              <p className="text-sm font-bold">{orderCallTag(order)}</p>
-              {order.callNumber !== null ? (
-                <span className="text-xs text-muted-foreground">{order.orderNumber}</span>
-              ) : null}
+              {/* D201 — the RO- number, and no call tag: the PO reversed
+                  D197's "#47" for the queue and the kitchen. */}
+              <p className="text-sm font-bold">{orderPermanentTag(order)}</p>
               <StatusBadge
                 label={UNIFIED_CHANNEL_LABELS[order.channel]}
                 tone={UNIFIED_CHANNEL_TONES[order.channel]}
@@ -504,7 +504,7 @@ function OrderDetailActions({
         <BillDialog
           session={session}
           saleId={billFor}
-          title={orderCallTag(order) ?? order.orderNumber}
+          title={orderPermanentTag(order) ?? ''}
           onClose={() => setBillFor(null)}
         />
       ) : null}
@@ -560,7 +560,7 @@ function OrderDetailActions({
         <Dialog
           open
           onClose={() => setConfirmCancel(false)}
-          title={`Cancel ${orderCallTag(order) ?? order.orderNumber}?`}
+          title={`Cancel ${orderPermanentTag(order) ?? 'this order'}?`}
           description="The kitchen stops making it and the order is marked Cancelled."
           footer={
             <>

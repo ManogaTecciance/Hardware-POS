@@ -1,11 +1,12 @@
 /**
- * D197 — the queue card is named by its call number.
+ * D201 — the queue card is named by its permanent RO- number.
  *
- * `RO-000120` is the permanent identifier and the wrong thing to say across a
- * counter; `#47` restarts every business day and is what the customer was
- * told. The card leads with the tag and keeps the RO- beside it, muted; an
- * order minted before D197 has no call number and reads `#RO-000120` alone,
- * exactly as it did; a third-party row reads the partner's reference.
+ * D197 led with the call tag ("#47") and kept the RO- beside it, muted; the
+ * PO reversed that for the queue and the kitchen: "keep RO, remove # numbers".
+ * The card is named `RO-000120` and carries NO call tag; an order minted
+ * before D197 reads its `RO-` exactly as it always did; a third-party row
+ * reads the partner's reference. The call number still exists and is still
+ * said to the guest — on the POS, the KOT paper and the bill.
  */
 import { cleanup, render, screen, within } from '@testing-library/react';
 import * as React from 'react';
@@ -125,40 +126,45 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('the card is named by its call number (D197)', () => {
-  it('leads with "#47" and keeps the RO- number beside it, muted', async () => {
+describe('the card is named by its RO- number (D201)', () => {
+  it('is "#RO-000120" and carries no call tag anywhere on the card', async () => {
+    /*
+     * D16: under D197 this case asserted the OPPOSITE — "#47" as the name
+     * with the RO- muted beside it. Reversed by decision (D201) and kept as
+     * strong: the call tag is asserted absent from the WHOLE card, so a copy
+     * moved to another element could not pass.
+     */
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
-    await screen.findByRole('button', { name: '#47' });
-    const card = cardNamed('#47');
-    // POSITIVE — the permanent identifier is still on the card…
-    expect(card.getByTestId('order-permanent-number').textContent).toBe('RO-000120');
-    // NEGATIVE — …but not as the name: the button is the tag alone.
-    expect(card.getByRole('button', { name: '#47' }).textContent).toBe('#47');
-    expect(card.queryByRole('button', { name: /RO-000120/ })).toBeNull();
-  });
-
-  it('an order minted before D197 reads "#RO-…" alone, as it always did', async () => {
-    render(<OrdersPage session={SESSION} branchId="brn_1" />);
-    await screen.findByRole('button', { name: '#RO-000009' });
-    const card = cardNamed('#RO-000009');
-    // No second, muted copy of the same number under the name.
+    await screen.findByRole('button', { name: '#RO-000120' });
+    const card = cardNamed('#RO-000120');
+    // POSITIVE — the name is the permanent number alone, spelled as every
+    // order was before D197…
+    expect(card.getByRole('button', { name: '#RO-000120' }).textContent).toBe('#RO-000120');
+    // …NEGATIVE — and the call tag appears nowhere on the card.
+    expect(card.queryByText(/#47/)).toBeNull();
     expect(card.queryByTestId('order-permanent-number')).toBeNull();
   });
 
-  it('a third-party row is named by the partner\'s reference', async () => {
+  it('an order minted before D197 reads its RO- exactly as it always did', async () => {
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
-    await screen.findByRole('button', { name: '#UE-9F3K' });
-    expect(cardNamed('#UE-9F3K').queryByTestId('order-permanent-number')).toBeNull();
+    await screen.findByRole('button', { name: '#RO-000009' });
+    expect(cardNamed('#RO-000009').queryByText(/#\d/)).toBeNull();
   });
 
-  it('MUTATION — a card that printed the RO- number as its name would fail the first case', async () => {
-    // The control: with the tag as the name there is exactly one button
-    // per card, and none of them is named by a six-digit number.
+  it("a third-party row is named by the partner's reference", async () => {
     render(<OrdersPage session={SESSION} branchId="brn_1" />);
-    await screen.findByRole('button', { name: '#47' });
+    await screen.findByRole('button', { name: '#UE-9F3K' });
+    expect(cardNamed('#UE-9F3K').queryByText(/#\d/)).toBeNull();
+  });
+
+  it('MUTATION — a card named by the call tag would fail the first case', async () => {
+    // The control: exactly one button per card, and none of them is a bare
+    // `#<digits>` — the spelling only the call tag uses.
+    render(<OrdersPage session={SESSION} branchId="brn_1" />);
+    await screen.findByRole('button', { name: '#RO-000120' });
     const names = screen
       .getAllByTestId('order-card')
       .map((c) => within(c).getAllByRole('button')[0]!.textContent);
-    expect(names).toEqual(['#47', '#RO-000009', '#UE-9F3K']);
+    expect(names).toEqual(['#RO-000120', '#RO-000009', '#UE-9F3K']);
   });
 });

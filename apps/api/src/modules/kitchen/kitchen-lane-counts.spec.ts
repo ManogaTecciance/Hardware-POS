@@ -727,3 +727,79 @@ describe('D174 — a station scopes the list AND the counts, together', () => {
     expect(shipped.map((w) => w.stationId)).toEqual([STATION, STATION, STATION, STATION]);
   });
 });
+
+describe('D200 — the board searches on the server, and the counts narrow with it', () => {
+  /** The `AND: [{ OR: legs }]` the search adds, or null when it added none. */
+  const searchLegs = (where: Record<string, unknown>): Record<string, unknown>[] | null => {
+    const and = where.AND as { OR?: Record<string, unknown>[] }[] | undefined;
+    return and?.[0]?.OR ?? null;
+  };
+
+  it('threads the term through the list AND all three counts, as one snapshot', async () => {
+    const { service, $transaction } = makeService();
+
+    await service.listTicketsForBranch(TENANT, BRANCH, 'OUTSTANDING', undefined, 'Lamprais');
+
+    const ops = opsOf($transaction);
+    expect(ops.map((op) => op.kind)).toEqual(['findMany', 'count', 'count', 'count']);
+    for (const op of ops) {
+      const legs = searchLegs(op.args.where!);
+      // POSITIVE — the same three legs the history searches (D175), on every
+      // statement of the tick: a chip counting cards the pass cannot see is
+      // the disagreement D174 was raised to end.
+      expect(legs).toEqual([
+        { ticketNumber: { contains: 'Lamprais', mode: 'insensitive' } },
+        { round: { order: { orderNumber: { contains: 'Lamprais', mode: 'insensitive' } } } },
+        { items: { some: { menuItemName: { contains: 'Lamprais', mode: 'insensitive' } } } },
+      ]);
+    }
+    // NEGATIVE — the search is nested, not a top-level OR: the CANCELLED
+    // pseudo-filter owns that key, and an object literal keeps only one.
+    for (const op of ops) expect('OR' in op.args.where!).toBe(false);
+  });
+
+  it('a bare or #-prefixed integer adds the call-number leg (D197), exactly', async () => {
+    const { service, $transaction } = makeService();
+
+    await service.listTicketsForBranch(TENANT, BRANCH, 'OUTSTANDING', undefined, '#47');
+
+    const legs = searchLegs(opsOf($transaction)[0]!.args.where!)!;
+    expect(legs).toContainEqual({ round: { order: { callNumber: 47 } } });
+    expect(legs).toHaveLength(4);
+  });
+
+  it('composes with a station cut rather than replacing it', async () => {
+    const { service, $transaction } = makeService();
+
+    await service.listTicketsForBranch(TENANT, BRANCH, 'OUTSTANDING', STATION, 'wings');
+
+    for (const op of opsOf($transaction)) {
+      expect(op.args.where!.stationId).toBe(STATION);
+      expect(searchLegs(op.args.where!)).not.toBeNull();
+    }
+  });
+
+  it('NEGATIVE — blank or absent adds nothing; the unsearched shape is untouched', async () => {
+    const { service, $transaction } = makeService();
+
+    await service.listTicketsForBranch(TENANT, BRANCH, 'OUTSTANDING');
+    await service.listTicketsForBranch(TENANT, BRANCH, 'OUTSTANDING', undefined, '   ');
+
+    for (const n of [0, 1]) {
+      for (const op of opsOf($transaction, n)) expect('AND' in op.args.where!).toBe(false);
+    }
+  });
+
+  it('the standalone counts route takes the same term, for the station-cut board', async () => {
+    const { service, $transaction } = makeService();
+
+    await service.laneCountsForBranch(TENANT, BRANCH, STATION, 'wings');
+
+    const ops = opsOf($transaction);
+    expect(ops).toHaveLength(3);
+    for (const op of ops) {
+      expect(op.args.where!.stationId).toBe(STATION);
+      expect(searchLegs(op.args.where!)).not.toBeNull();
+    }
+  });
+});

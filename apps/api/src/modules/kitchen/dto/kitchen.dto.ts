@@ -77,6 +77,15 @@ export class MarkFailedDto {
  */
 export class QueryKitchenLaneCountsDto {
   @IsOptional() @IsString() @MaxLength(128) stationId?: string;
+  /**
+   * D200 — the board's search, server-side, on the list AND the counts. The
+   * same three legs the history search has (ticket number, order number or
+   * call number, dish), bounded the same way (D142's 120), and on this DTO
+   * rather than the tickets one so a station cut's counts read narrows with
+   * the same term as its list — the two are pinned to each other (D174), and a
+   * search on one alone would be a chip counting cards the pass cannot see.
+   */
+  @IsOptional() @IsString() @MaxLength(120) search?: string;
 }
 
 /**

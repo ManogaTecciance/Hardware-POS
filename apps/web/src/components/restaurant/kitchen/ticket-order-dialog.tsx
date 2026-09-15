@@ -1,8 +1,9 @@
 'use client';
 
-import { orderFullRef } from '@hardware-pos/shared';
 import { sendLabel } from '@/lib/restaurant/labels';
 import * as React from 'react';
+
+import { orderPermanentTag } from '@hardware-pos/shared';
 
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
@@ -81,7 +82,10 @@ export function TicketOrderDialog({
       title={ticket.placeLabel ?? ticket.ticketNumber}
       description={
         order
-          ? `${orderFullRef(order) ?? ''}${order.waiterName ? ` · ${order.waiterName}` : ''} · whole order`
+          ? // D201 — the RO- number, as on the board's own provenance line.
+            [orderPermanentTag(order), order.waiterName, 'whole order']
+              .filter(Boolean)
+              .join(' · ')
           : 'Loading the order…'
       }
       className="sm:max-w-lg"

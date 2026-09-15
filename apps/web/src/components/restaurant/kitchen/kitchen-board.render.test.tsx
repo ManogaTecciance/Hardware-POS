@@ -1335,16 +1335,21 @@ describe('station ribbon (D152)', () => {
     expect(thin.textContent).toBe('Nimal');
   });
 
-  it('D197 — names the order by its call number, and the six-digit RO- is nowhere on the card', async () => {
+  it('D201 — names the order by its RO- number; the call tag is nowhere on the card', async () => {
+    /*
+     * D16: this case asserted the OPPOSITE under D197 ("#47 · Nimal", no
+     * RO-). Reversed by decision — the PO: "keep RO, remove # numbers" — and
+     * kept as strong: the tag is asserted absent from the whole board.
+     */
     outstandingRows = [ticket({ id: 'tk_call', placeLabel: 'T1', callNumber: 47 })];
     render(<KitchenBoard session={SESSION} branchId="brn_1" />);
 
     await waitFor(() => expect(screen.getByText('T1')).toBeTruthy());
 
-    // POSITIVE — "#47" is what the pass shouts at handover.
-    expect(screen.getByText('#47 · Nimal')).toBeTruthy();
-    // NEGATIVE — the permanent identifier is not the kitchen's business.
-    expect(screen.queryByText(/RO-000010/)).toBeNull();
+    // POSITIVE — the permanent number is what the pass reads.
+    expect(screen.getByText('#RO-000010 · Nimal')).toBeTruthy();
+    // NEGATIVE — the call tag is not on the board.
+    expect(screen.queryByText(/#47/)).toBeNull();
   });
 
   it('carries the round at the far end of the ribbon, opposite the station', async () => {

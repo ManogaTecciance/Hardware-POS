@@ -508,6 +508,7 @@ export class KitchenService {
     branchId: string,
     filter?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'COMPLETED_TODAY',
     stationId?: string,
+    search?: string,
   ): Prisma.KitchenTicketWhereInput {
     /*
      * D174 — the scope every branch below opens with. The station key is
@@ -523,10 +524,20 @@ export class KitchenService {
      * absent. That is the truth about the row, not an oversight: inventing a
      * station for it is the backfill D152 declined to write.
      */
+    /*
+     * D200 — the search, threaded through the same one `where` the list and
+     * the counts share, for D174's reason: a term on the list alone is a chip
+     * counting cards the pass cannot see. Under `AND` rather than a top-level
+     * `OR`, because the CANCELLED branch below already owns that key and an
+     * object literal keeps only the last of two. Blank is omitted, so the
+     * unsearched shape stays byte-for-byte what the specs pin.
+     */
+    const term = search?.trim();
     const scope: Prisma.KitchenTicketWhereInput = {
       tenantId,
       branchId,
       ...(stationId ? { stationId } : {}),
+      ...(term ? { AND: [{ OR: ticketSearchLegs(term) }] } : {}),
     };
     /*
      * "This ticket's work was called off", spelled from the ticket's point
@@ -602,8 +613,9 @@ export class KitchenService {
     tenantId: string,
     branchId: string,
     stationId?: string,
+    search?: string,
   ): [Prisma.PrismaPromise<number>, Prisma.PrismaPromise<number>, Prisma.PrismaPromise<number>] {
-    const outstanding = this.whereForFilter(tenantId, branchId, 'OUTSTANDING', stationId);
+    const outstanding = this.whereForFilter(tenantId, branchId, 'OUTSTANDING', stationId, search);
     return [
       this.prisma.kitchenTicket.count({
         where: {
@@ -619,7 +631,7 @@ export class KitchenService {
         where: { ...outstanding, status: KitchenTicketStatus.IN_PROGRESS },
       }),
       this.prisma.kitchenTicket.count({
-        where: this.whereForFilter(tenantId, branchId, 'COMPLETED_TODAY', stationId),
+        where: this.whereForFilter(tenantId, branchId, 'COMPLETED_TODAY', stationId, search),
       }),
     ];
   }
@@ -653,8 +665,14 @@ export class KitchenService {
     branchId: string,
     filter?: KitchenTicketStatus | 'OUTSTANDING' | 'CANCELLED' | 'COMPLETED_TODAY',
     stationId?: string,
+    /**
+     * D200 — the board's search. Narrows `items` AND `counts` together, the
+     * way `stationId` does: a search is a view of the pass, and every number
+     * on that view describes what the view shows.
+     */
+    search?: string,
   ): Promise<KitchenTicketListView> {
-    const where = this.whereForFilter(tenantId, branchId, filter, stationId);
+    const where = this.whereForFilter(tenantId, branchId, filter, stationId, search);
 
     const [rows, toMake, preparing, doneToday] = await this.prisma.$transaction([
       this.prisma.kitchenTicket.findMany({
@@ -682,7 +700,7 @@ export class KitchenService {
               },
         include: TICKET_INCLUDE,
       }),
-      ...this.laneCountQueries(tenantId, branchId, stationId),
+      ...this.laneCountQueries(tenantId, branchId, stationId, search),
       ],
       /*
        * D154 — REPEATABLE READ, or the promise above is not one.
@@ -726,9 +744,10 @@ export class KitchenService {
     tenantId: string,
     branchId: string,
     stationId?: string,
+    search?: string,
   ): Promise<KitchenLaneCounts> {
     const [toMake, preparing, doneToday] = await this.prisma.$transaction(
-      this.laneCountQueries(tenantId, branchId, stationId),
+      this.laneCountQueries(tenantId, branchId, stationId, search),
       /*
        * D174 — the same REPEATABLE READ the list read takes (D154). Under a
        * station cut this route now feeds a chip on the board, so its three
@@ -851,19 +870,9 @@ export class KitchenService {
        * that now selects it, and the two would have disagreed about what "T4"
        * means the moment a dish name contained it.
        */
-      ...(search
-        ? {
-            OR: [
-              { ticketNumber: { contains: search, mode: 'insensitive' } },
-              { round: { order: { orderNumber: { contains: search, mode: 'insensitive' } } } },
-              // D197 — "47" or "#47" is the call number, matched exactly.
-              ...(callNumberSearch(search) !== null
-                ? [{ round: { order: { callNumber: callNumberSearch(search)! } } }]
-                : []),
-              { items: { some: { menuItemName: { contains: search, mode: 'insensitive' } } } },
-            ],
-          }
-        : {}),
+      // D200 — the same legs the board searches; one definition of "what a
+      // person types about a ticket" for both screens.
+      ...(search ? { OR: ticketSearchLegs(search) } : {}),
     };
 
     const [rows, total] = await this.prisma.$transaction([
@@ -1317,6 +1326,29 @@ const TICKET_INCLUDE = {
 function callNumberSearch(search: string): number | null {
   const m = /^#?(\d+)$/.exec(search.trim());
   return m ? Number(m[1]) : null;
+}
+
+/**
+ * The three things a person remembers about a ticket and would TYPE: its own
+ * number, the order it belonged to (by number, or by call number when the
+ * term is a bare integer — D197), and what was on it. Searching the dish name
+ * matters most: "which table had the lamprais" is the question, and no ticket
+ * number is remembered alongside it.
+ *
+ * D175 took the station and the table OUT of here — both are structured
+ * filters now — and D200 made this the one spelling for the history AND the
+ * live board, so a term cannot mean one thing on one screen and another on
+ * the other. Returned as the OR's legs rather than a `where`, because the
+ * history owns the top-level `OR` and the board nests it under `AND`.
+ */
+function ticketSearchLegs(search: string): Prisma.KitchenTicketWhereInput[] {
+  const callNumber = callNumberSearch(search);
+  return [
+    { ticketNumber: { contains: search, mode: 'insensitive' } },
+    { round: { order: { orderNumber: { contains: search, mode: 'insensitive' } } } },
+    ...(callNumber !== null ? [{ round: { order: { callNumber } } }] : []),
+    { items: { some: { menuItemName: { contains: search, mode: 'insensitive' } } } },
+  ];
 }
 
 function toView(

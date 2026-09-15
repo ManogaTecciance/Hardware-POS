@@ -52,6 +52,12 @@ export class KdsController {
      * route IS the list read, and a station screen driven off it would want
      * its own slice and its own numbers rather than the branch's.
      */
-    return this.kitchen.listTicketsForBranch(tenantId, branchId, filter, query.stationId);
+    return this.kitchen.listTicketsForBranch(
+      tenantId,
+      branchId,
+      filter,
+      query.stationId,
+      query.search,
+    );
   }
 }

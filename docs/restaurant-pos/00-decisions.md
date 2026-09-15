@@ -7695,6 +7695,125 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D201 — the queue and the kitchen name an order by its permanent number, not its call number
+
+**Status:** accepted and **built**, 2026-09-15. Frontend plus one helper in
+`shared`; no API, schema or paper change.
+
+### What was asked
+
+> "#2 no need this order number for kitchen and orders"
+
+read first as "drop the RO-", built that way, and corrected within the hour:
+
+> "noo i mean keep ro remove # numbers"
+
+### What changed
+
+D197 put the call number first on the Orders queue and the kitchen screens
+(`#47`, with the permanent `RO-` muted beside it). The PO has reversed that
+for those two screens: the pass and the queue read the ORDER NUMBER; the
+short call-out is for the guest, and stays where the guest hears it.
+
+| Surface | D197 | Now |
+|---|---|---|
+| Orders queue card | `#47` + muted `RO-000120` | `#RO-000120` |
+| Order drawer (title, summary row, bill title, cancel prompt) | `#47 · RO-000120` / `Cancel #47?` | `#RO-000120` / `Cancel #RO-000120?` |
+| Kitchen board provenance | `#47 · Nimal` | `#RO-000120 · Nimal` |
+| Kitchen history row | `#47 · RO-000120 · 2nd send` | `#RO-000120 · 2nd send` |
+| Kitchen ticket dialog | `#47 · RO-000120 · Nimal · whole order` | `#RO-000120 · Nimal · whole order` |
+
+Spelled `#RO-000120` — the `#` kept — because that is exactly how these
+screens spelled every order before D197, and the dozens of assertions that
+pin `#ORD_…` names on the queue's other specs are the proof that the spelling
+was settled; a bare `RO-000120` would have moved all of them for nothing.
+
+**One helper, `orderPermanentTag`** (`@hardware-pos/shared`
+`order-call-label.ts`), beside `orderCallTag` and `orderFullRef`, for D197's
+own reason: the last time one label was spelled in several places it drifted
+onto an invoice. The five screens read it; nothing else does.
+
+**Not changed:** the call number itself — it is still minted, still on the
+POS session sheet and completion screen (`Order #47`, "Tell the customer"),
+still the KOT paper's headline (`#47`, D174/D197) and still on the settled
+bill beside the RO-. The dashboard's takeaway list keeps `orderFullRef`
+(`#47 · RO-…`). Both numbers stay searchable everywhere.
+
+### Assertions changed, deliberately
+
+D16 forbids editing behavioural assertions for a refactor; this is a policy
+reversal with this record behind it. `orders-page.call-number.render.test.tsx`
+and the board's D197 case asserted `#47` as the name — both now assert the
+`#RO-` as the name AND the call tag absent from the whole card (stronger, not
+looser). A call-numbered case was added to the history and drawer specs on the
+same shape; the pre-D197 cases (`#RO-…` alone) stand unchanged as the control
+that the fallback never moved.
+
+### D200 — the kitchen board searches on the server
+
+**Status:** accepted and **built**, 2026-09-15. Kitchen only. One optional
+query param on two existing routes; no schema change, no migration.
+
+### What was asked
+
+> "add server side search for the kitchen"
+
+The ticket HISTORY has searched on the server since D142; the live BOARD —
+the screen a cook actually stands at — had no search at all. A pass with
+forty tickets across two lanes and three stations had no way to find "the
+lamprais" but to read every card.
+
+### Why server-side, on a screen that already holds its rows
+
+The board reads ONE lane at a time and polls it. A client-side match over the
+rows in hand would answer "no tickets" for a ticket sitting on the other lane,
+and the chips would go on counting the unsearched pass — the disagreement
+D154 (cards vs chips) and D174 (station cut) were both raised to end. The
+history already had the right shape; this puts the board on it.
+
+### The decision
+
+- **`?search=`** on `GET …/kitchen-tickets` (the board's read, and `/kds/board`
+  with it) and on `GET …/kitchen-tickets/counts`. On the DTO the two share
+  (`QueryKitchenLaneCountsDto`), bounded at D142's 120.
+- **One definition of the legs.** `ticketSearchLegs(term)` in
+  `kitchen.service.ts` — ticket number, order number, the call number when
+  the term is a bare or `#`-prefixed integer (D197), dish name — is now what
+  BOTH the history and the board search. The history keeps its top-level
+  `OR: legs`, byte-for-byte; the board nests `AND: [{ OR: legs }]`, because
+  the CANCELLED pseudo-filter already owns the top-level `OR` and an object
+  literal keeps only the last of two.
+- **Threaded through `whereForFilter`**, the one `where` the list and the
+  three counts are built from — for D174's reason. A search narrows `items`
+  AND `counts` together, the way a station does; the standalone counts route
+  takes the same term so a station-cut board's chips count what its cards
+  show. Blank is omitted, so the unsearched shape stays what the specs pin.
+- **On screen:** the same box the history has, its own row under the lane
+  chips (a wall tablet's chips keep their width), debounced 250 ms and
+  normalised, sent on every poll. The chime baseline is keyed on the term as
+  it is on the station: a term that reveals tickets is a change of view, not
+  an arrival, and while one is typed the chime hears only matching work. An
+  empty lane under a term says *No tickets match "x" on this lane · Show
+  every ticket* rather than "Nothing to make". Deliberately NOT remembered
+  across a reload the way the station is (D152): a search is a lookup, a
+  station is where the screen is mounted.
+- **The list read keeps three arguments while no term is set.** The D174
+  specs pin that arity as the proof the board never station-cuts its list
+  (the strip counts every station from it); the term rides as a fourth
+  argument only while one exists, so that proof stays exactly as written.
+
+### Verified
+
+API: five cases appended to `kitchen-lane-counts.spec.ts` (term on all four
+statements of the tick; the call-number leg; composes with a station cut;
+blank adds nothing; the counts route takes it); the seven kitchen suites
+stay green (97 → 102), the history's OR-shape pins included. Web:
+`kitchen-board.search.render.test.tsx` (4) with a fixture that plays the
+server's three legs; the D174 arity pins in the sibling suite untouched and
+green. Mutation-proven: the term dropped from the list read → every case
+fails; from the counts read → the station case alone; from the chime key →
+the "does not ring" case alone.
+
 ### D199 — a no-show is a fact about a time that has passed
 
 **Status:** accepted and **built**, 2026-09-15. Reservations only. No schema

@@ -68,6 +68,8 @@ export class KitchenTicketsController {
       branchId,
       parseFilter(query.status),
       query.stationId,
+      // D200 — the board's search: the same term narrows the counts.
+      query.search,
     );
   }
 
@@ -99,7 +101,7 @@ export class KitchenTicketsController {
     @Param('branchId') branchId: string,
     @Query() query: QueryKitchenLaneCountsDto,
   ): Promise<KitchenLaneCounts> {
-    return this.service.laneCountsForBranch(tenantId, branchId, query.stationId);
+    return this.service.laneCountsForBranch(tenantId, branchId, query.stationId, query.search);
   }
 
   /**

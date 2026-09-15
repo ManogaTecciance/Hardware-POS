@@ -37,6 +37,19 @@ export function orderCallTag(ref: OrderCallRef): string | null {
   return ref.orderNumber ? `#${ref.orderNumber}` : null;
 }
 
+/**
+ * D201 — `#RO-000120`: the PERMANENT number as a tag, the call number ignored.
+ *
+ * What the Orders queue and the kitchen screens show. D197 had them lead with
+ * the call tag; the PO reversed that for those two screens ("keep RO, remove
+ * # numbers") while the call-out stays where the guest hears it — the POS,
+ * the KOT paper and the bill. Spelled exactly as those screens spelled every
+ * order before D197, `#` included, so nothing that pinned `#RO-…` moved.
+ */
+export function orderPermanentTag(ref: Pick<OrderCallRef, 'orderNumber'>): string | null {
+  return ref.orderNumber ? `#${ref.orderNumber}` : null;
+}
+
 /** `#47 · RO-000120`; collapses to the tag alone when the two would repeat. */
 export function orderFullRef(ref: OrderCallRef): string | null {
   const tag = orderCallTag(ref);
