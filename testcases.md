@@ -113,6 +113,9 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | DASH-029 | View Reports opens Reports (D161) | Dashboard as an owner/manager → click **View Reports** in the action bar (it may be under "More actions" on a narrow window) | Lands on **/reports**. Before D161 it went to /sales — every signal about the button said Reports except its link, and it had never worked since the dashboard shipped | P | Not Run |
 | DASH-030 | The buttons beside it are unchanged (D161) | On the same bar, click **Create Quote**, then **Add Product** | /quotations/new and /products/new. Several KPI TILES on this screen still go to /sales on purpose — a metric drills into the list its number came from — and that is not the same thing as the action button | P | Not Run |
 | DASH-031 | View Reports is hidden without permission (D161) | Sign in as a role lacking `report:read` and open the dashboard | No View Reports button, and the rest of the action bar is still there. Same permission the sidebar's Reports entry uses | N | Not Run |
+| DASH-032 | A narrow panel does not break its header (D176) | Narrow the window, or collapse the sidebar, until the Business Attention panel is around 330px | The `1 critical` badge stays on ONE line and the title stays readable. The filter control drops to its own row. Before D176 the badge wrapped to `1` / `critical` and the title collapsed to "B." | P | Not Run |
+| DASH-033 | The header follows the PANEL, not the window (D176) | At a fixed window size, collapse and expand the sidebar | The header re-lays out as the panel's width changes, without the window moving. It is a container query — the same card is wide on a dashboard and narrow in a sidebar on the same screen | P | Not Run |
+| DASH-034 | Wide panels are unchanged (D176) | View the dashboard full width | One row exactly as before: icon, title, badge, filter control. The fix lets the row break when it must; it must not change what already fits | N | Not Run |
 
 ## PROD — Products & Categories
 
@@ -970,7 +973,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 |---|---|---|---|
 | AUTH | 15 | CUST | 42 |
 | PERM | 17 | CIMP | 10 |
-| DASH | 31 | SUP | 15 |
+| DASH | 34 | SUP | 15 |
 | PROD | 93 | SIMP | 8 |
 | PIMP | 18 | QB | 31 |
 | POS | 62 | SET | 36 |
@@ -984,7 +987,7 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 755 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 758 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 

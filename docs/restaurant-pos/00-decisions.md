@@ -11306,6 +11306,95 @@ screen. Recorded as the known limit rather than left to be discovered.
 
 ---
 
+## D176 — a card header breaks rather than crushing itself
+
+**Status:** accepted and **built**, 2026-09-16. Presentation only; no schema, no
+API, no migration.
+
+### What was reported
+
+> "1 critical is not suitable in small screens needed to fix that"
+
+On a narrow dashboard panel the **Business Attention** header rendered its
+`1 critical` badge across two lines — `1` above `critical` — and the title beside
+it had collapsed to **"B."**.
+
+### Three faults, compounding
+
+`SectionCard`'s header was one unbreakable row:
+
+```tsx
+<header className="flex items-center justify-between gap-3 …">
+  <div className="flex min-w-0 items-center gap-2.5">
+    {icon}{title}{badge}
+  </div>
+  {action ? <div className="shrink-0">{action}</div> : null}
+</header>
+```
+
+1. **`action` was `shrink-0`.** The three-option segmented control took whatever
+   width it wanted and never yielded.
+2. **`badge` was neither `shrink-0` nor `whitespace-nowrap`.** So the badge was
+   what gave — and a **count** is the one part of a header that must never wrap.
+   "1 / critical" reads as two facts rather than one.
+3. **The title has `truncate`.** It absorbed everything left and stopped saying
+   anything.
+
+### Why nothing could be fixed by shrinking harder
+
+An icon, "Business Attention", a count badge and a three-option control do not
+fit a 330px panel at any distribution of the space. Something has to move.
+
+**So the row is allowed to break.** `flex-[1_1_14rem]` is the left group
+declaring it wants 14rem before anything wraps, and flex decides line breaks
+from the *basis* — so the control drops to its own line instead of squeezing the
+title out. `flex-1` would not do: it is `flex: 1 1 0%`, basis zero, so the group
+shrinks away silently, which is the behaviour being fixed.
+
+At the reported width that yields:
+
+```
+[⚠] Business Attention  [1 critical]
+[ All | Critical | Warnings ]
+```
+
+### `@container`, not a viewport breakpoint
+
+This is a panel in a grid. Its width has little to do with the window's — the
+same card is wide on a dashboard and narrow in a sidebar on the identical
+screen, and collapsing the sidebar changes it without the viewport moving. The
+dashboard already reasons this way (`KPIGrid`, the hero); this follows it.
+
+### Fixed in the primitive, not the caller
+
+The badge is wrapped in `shrink-0 whitespace-nowrap` inside `SectionCard`
+itself, so every card gets it including ones not written yet. `whitespace-nowrap`
+inherits, so a badge built from several spans — which this one is — stays on one
+line as a whole.
+
+### On testing this
+
+jsdom has **no layout engine**: every element is 0×0 and nothing wraps, so a
+test that measured would pass against the broken component and the fixed one
+alike. What is provable is the **CSS contract** that produces the behaviour, and
+that contract is exactly what was missing — so pinning it is pinning the fix.
+
+Whether 14rem is the right basis is a judgement about looks. That belongs in
+front of a person (DASH-032..034), not in an assertion.
+
+The negative halves carry the weight: `flex-nowrap` is asserted **absent** from
+the header and `min-w-0` **absent** from the badge wrapper. Both are the states
+the component was in when it broke, and a test that only checked for the new
+classes would pass with the old ones still sitting beside them — where the later
+rule in the stylesheet wins.
+
+**Mutation-proven** by reverting the header to the reported-broken layout
+verbatim: **4 of 6 fail**. The two that survive pin behaviour that did not
+change — a card with no badge and no action, and a long title still truncating —
+which is what they are for.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |

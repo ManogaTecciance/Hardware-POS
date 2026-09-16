@@ -275,13 +275,35 @@ export function SectionCard({
         className,
       )}
     >
+      {/*
+        D176 — the header wraps rather than crushing itself.
+
+        Reported against "Business Attention": its `1 critical` badge broke onto
+        two lines and the title collapsed to "B.". Three things caused it.
+
+        `action` was `shrink-0`, so the segmented control took whatever width it
+        wanted. `badge` was neither `shrink-0` nor `whitespace-nowrap`, so it was
+        the thing that gave — a COUNT is the one part of a header that must never
+        wrap, because "1 / critical" reads as two facts. And the title has
+        `truncate`, so it absorbed the rest and stopped saying anything.
+
+        Nothing could be fixed by shrinking harder: icon + title + badge + a
+        three-option control genuinely does not fit a 330px panel. So the row is
+        allowed to BREAK. `flex-[1_1_14rem]` is the left group declaring it wants
+        14rem before anything wraps; flex decides line breaks from that basis, so
+        the control drops to its own line instead of squeezing the title out.
+
+        `@container` and not a viewport breakpoint: this is a panel in a grid, and
+        its width has little to do with the window's. The same card is wide on a
+        dashboard and narrow in a sidebar on the identical screen.
+      */}
       <header
         className={cn(
-          'flex items-center justify-between gap-3 border-b border-border px-4 py-3',
+          '@container flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border px-4 py-3',
           headerClassName,
         )}
       >
-        <div className="flex min-w-0 items-center gap-2.5">
+        <div className="flex min-w-0 flex-[1_1_14rem] items-center gap-2.5">
           {Icon ? (
             <span
               className={cn(
@@ -298,7 +320,12 @@ export function SectionCard({
               <p className="truncate text-xs text-muted-foreground">{description}</p>
             ) : null}
           </div>
-          {badge}
+          {/*
+            Wrapped here rather than at each call site so every card gets it,
+            including ones not written yet. `whitespace-nowrap` inherits, so a
+            badge built from several spans stays on one line as a whole.
+          */}
+          {badge ? <div className="shrink-0 whitespace-nowrap">{badge}</div> : null}
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
       </header>
