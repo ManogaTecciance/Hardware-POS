@@ -7695,6 +7695,46 @@ same route; the merged page still renders those tabs, so the screen stays
 reachable for every business kind. The search box collapses runs of
 whitespace the way Customers and Sales already do.
 
+### D202 — deactivating a product asks first
+
+**Status:** accepted and **built**, 2026-09-15. Frontend only; one confirm on
+one button.
+
+### What was asked
+
+> "now we can deactivate product in menu can you add confimation poput"
+
+### What was wrong
+
+The Products list's Deactivate icon (`Ban`, red, one button from Edit) fired
+on a single tap. Deactivating is the widest-reaching verb on the list: the
+item leaves the menu, the POS catalogue and the takeaway/online channels at
+every branch in the same moment, and nothing on the row said so before it
+happened.
+
+### The decision
+
+- **Deactivate asks**, through the app's own confirm (D145 — never
+  `window.confirm`, which is untappably small on a tablet and silently
+  suppressed after a few): *"Deactivate Chicken Kottu?"* — *"It will be
+  removed from the menu and the POS at every branch until you reactivate it.
+  Past sales are not affected."* — **Deactivate** / Cancel, danger tone
+  (Cancel takes focus).
+- **Reactivate does not ask.** It is the undo of the destructive verb, and
+  asking twice would make the correction cost as much as the mistake — the
+  same asymmetry the counter's Clear order (D145) draws.
+- Awaited, with the early return as the point: a "no" leaves the row exactly
+  as it was.
+
+### Verified
+
+`products-list.deactivate.render.test.tsx` (3): Cancel leaves the endpoint
+uncalled and the native dialog unused; Confirm calls it; Activate raises no
+dialog. Mutation-proven: the `await` dropped → the Cancel case fails alone;
+the `isActive` guard dropped → the reactivate case fails alone. The existing
+`product-screens.render.test.tsx` now mounts the list inside `ConfirmProvider`
+(a harness change, no assertion touched) and stays green.
+
 ### D201 — the queue and the kitchen name an order by its permanent number, not its call number
 
 **Status:** accepted and **built**, 2026-09-15. Frontend plus one helper in

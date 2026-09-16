@@ -187,6 +187,8 @@ vi.mock('@/lib/products/brands-api', async (importOriginal) => {
 });
 
 // Imported after the mocks so the modules under test pick them up.
+// D202 — the list asks before deactivating, through the app's own confirm.
+const { ConfirmProvider } = await import('@/components/ui/confirm');
 const ProductsPage = (await import('@/app/(app)/products/page')).default;
 const ProductDetailPage = (await import('@/app/(app)/products/[id]/page')).default;
 // The 3-step ProductForm was replaced by the 4-step ProductWizard in D44. The
@@ -215,7 +217,11 @@ async function renderScreen(
   state: typeof profileState,
 ): Promise<void> {
   profileState = state;
-  render(<Screen />);
+  render(
+    <ConfirmProvider>
+      <Screen />
+    </ConfirmProvider>,
+  );
   await settle();
 }
 

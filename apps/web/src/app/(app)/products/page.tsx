@@ -23,6 +23,7 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { useConfirm } from '@/components/ui/confirm';
 import { Pagination } from '@/components/ui/pagination';
 import { Input } from '@/components/ui/input';
 import { SearchSelect } from '@/components/ui/search-select';
@@ -90,6 +91,10 @@ function SourceCell({
 
 export default function ProductsPage() {
   const { session, hasPermission } = useAuth();
+  // D202 — the app's own confirm (D145), for the one destructive verb on this
+  // list. Deactivating pulls a product off every POS and menu at once, and the
+  // button that does it sits one icon away from Edit.
+  const confirm = useConfirm();
   const canManage = hasPermission(Permission.PRODUCT_MANAGE);
   // D101 — the 86 switch has its own permission so the till can hold it
   // without catalogue write access.
@@ -216,6 +221,27 @@ export default function ProductsPage() {
 
   const toggleActive = async (p: ManagedProduct) => {
     if (!session) return;
+    /*
+     * D202 — asked only on the way DOWN. Deactivating is the destructive
+     * direction (the item vanishes from the menu, the POS and every branch
+     * until someone brings it back); reactivating is that action's undo and
+     * asking again would make the correction cost as much as the mistake.
+     * Awaited, and the early return is the point: a "no" must leave the row
+     * exactly as it was (D145).
+     */
+    if (
+      p.isActive &&
+      !(await confirm({
+        title: `Deactivate ${p.name}?`,
+        message:
+          'It will be removed from the menu and the POS at every branch until you ' +
+          'reactivate it. Past sales are not affected.',
+        confirmLabel: 'Deactivate',
+        tone: 'danger',
+      }))
+    ) {
+      return;
+    }
     setBusyId(p.id);
     try {
       if (p.isActive) await deactivateProduct(session, p.id);
