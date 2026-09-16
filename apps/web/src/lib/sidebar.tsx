@@ -59,16 +59,36 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     }
   }, [collapsed, hydrated]);
 
+  /*
+   * D177 — the callbacks are STABLE, and that is load-bearing.
+   *
+   * They used to be defined inside the `useMemo` below, so a new identity was
+   * created every time `collapsed`, `mobileOpen` or `hydrated` changed. `Sidebar`
+   * has an effect that closes the drawer on navigation:
+   *
+   *     React.useEffect(() => { closeMobile(); }, [pathname, closeMobile]);
+   *
+   * so opening the drawer changed `mobileOpen`, which rebuilt the memo, which
+   * gave `closeMobile` a new identity, which re-ran that effect, which closed
+   * the drawer again. **The button worked; the drawer shut itself in the same
+   * tick.** Below the `tab:` cutover — where the rail is hidden and the drawer
+   * is the only way to reach navigation — the app had no navigation at all.
+   *
+   * `useCallback` with no dependencies is safe here because React guarantees
+   * the `setState` functions are stable, and both updaters are functional.
+   *
+   * The lesson is general: a context value handed to `useEffect` dependency
+   * arrays is part of the API. An unstable function in it does not merely cost
+   * a re-render — it can invert the behaviour of every effect that depends on
+   * it, far from where the instability lives.
+   */
+  const toggleCollapsed = React.useCallback(() => setCollapsed((c) => !c), []);
+  const openMobile = React.useCallback(() => setMobileOpen(true), []);
+  const closeMobile = React.useCallback(() => setMobileOpen(false), []);
+
   const value = React.useMemo<SidebarValue>(
-    () => ({
-      collapsed,
-      toggleCollapsed: () => setCollapsed((c) => !c),
-      mobileOpen,
-      openMobile: () => setMobileOpen(true),
-      closeMobile: () => setMobileOpen(false),
-      hydrated,
-    }),
-    [collapsed, mobileOpen, hydrated],
+    () => ({ collapsed, toggleCollapsed, mobileOpen, openMobile, closeMobile, hydrated }),
+    [collapsed, toggleCollapsed, mobileOpen, openMobile, closeMobile, hydrated],
   );
 
   return <SidebarContext.Provider value={value}>{children}</SidebarContext.Provider>;

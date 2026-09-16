@@ -924,6 +924,11 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | UI-031 | Every modal opens in the middle of the screen (PO) | Open any modal at 1440, 1024, 768 and 390 px wide — a confirm, the ticket-order details, a payment dialog | Each is centred vertically and horizontally at every width, never flush to the bottom edge, with a gap to the screen edge and all four corners rounded | P | Not Run |
 | UI-032 | Wide panels are centred too, not stuck to the bottom (D145) | Open the dine-in bill, the modifier picker, the payment popup and the variant editor on a desktop window | Each floats in the MIDDLE of the window with the scrim visible above AND below it, rounded on all four corners, with no grab handle. None sits against the bottom edge | P | Not Run |
 | UI-033 | The three deliberately edge-anchored surfaces still are (D145) | Open a supplier QuickBooks mapping drawer, an order-detail drawer, the command palette with Ctrl+K, and the retail cart at phone width | The two drawers slide in from the right at full height, the palette opens near the top, and the phone cart rises from the bottom. These are panels and a palette, not questions, and centring them is not wanted | P | Not Run |
+| UI-034 | The More menu is reachable on a narrow screen (D177) | Narrow the window until the hero's secondary actions collapse into `…`, then open it | The menu is fully visible and Create Quote is clickable. Before D177 the hero's `overflow-hidden` cut it off at the card's bottom edge — and below that width the menu is the ONLY route to Create Quote | P | Not Run |
+| UI-035 | The hero still looks like a card (D177) | Compare the hero at full width against before | Rounded corners and gradient unchanged. The clip was removed because nothing needed it, not because the card should change | N | Not Run |
+| UI-036 | The nav opener actually opens the nav (D177) | Below 900px, press the panel button top-left | The drawer slides in and STAYS open. Before D177 it opened and closed itself in the same tick, so below the cutover there was no way to reach navigation at all | P | Not Run |
+| UI-037 | Collapsing the rail does not close the drawer (D177) | Open the drawer, then toggle the rail | The drawer stays open. Same root cause as UI-036 by a different trigger, so a partial fix cannot look complete | N | Not Run |
+| UI-038 | The drawer still closes (D177) | Open it, then press Escape, tap the overlay, and navigate | Each closes it. Making it openable must not make it un-closable | N | Not Run |
 | UI-017 | Tooltips are not clipped by their table | Hover a tooltip in the sales, products, customers or invoices table | The bubble shows in full above the row, not trimmed to the cell or the card | P | Not Run |
 | UI-018 | Tooltip follows the page as it scrolls | Hover a tooltip, then scroll the table or the page | It stays with its trigger, or goes away — never stranded mid-screen | P | Not Run |
 | UI-019 | Tooltip on a disabled control | Hover the disabled Mark paid on a customer's last invoice | Reason is shown; the button is still not clickable | P | Not Run |
@@ -983,11 +988,11 @@ Modules: [AUTH](#auth--sessions) · [PERM](#perm--roles--permissions) ·
 | SALE | 33 | BSPL | 14 |
 | RET | 18 | KIT | 22 |
 | EXC-T | 12 | ADM | 31 |
-| EXC-D | 10 | UI | 33 |
+| EXC-D | 10 | UI | 38 |
 | QUO | 21 | SEC | 12 |
 | STK | 4 | RPT | 4 |
 
-**Total: 758 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
+**Total: 763 test cases** (counted from the tables above; the restaurant modules — EXC, RSV, OTBL, BSPL, KIT — and the retail modules — STK, RPT — are included, and the EXC-T rows now count as coverage since D128 made the transaction real).
 
 ### Notes for automation
 

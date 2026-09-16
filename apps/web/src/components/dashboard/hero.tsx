@@ -44,8 +44,25 @@ export function DashboardHero({
   onRefresh?: () => void;
   refreshing?: boolean;
 }) {
+  /*
+   * D177 — no `overflow-hidden` on the card.
+   *
+   * It was clipping the "More actions" menu. Below `@min-[1180px]` the secondary
+   * actions collapse into that menu, so on a narrow screen the dropdown was the
+   * ONLY route to Create Quote — and it was cut off at the card's bottom edge.
+   * `z-30` on the menu could not help: `overflow: hidden` clips regardless of
+   * stacking.
+   *
+   * Nothing needed it. The rounded corners clip `bg-hero-gradient` on their own
+   * — a background always honours `border-radius` — and this card has no
+   * absolutely-positioned decoration to contain, unlike `MetricCard`. It was
+   * carried over from a card that does.
+   *
+   * If a decorative overlay is ever added here, clip THAT element rather than
+   * the card, or the menu breaks again.
+   */
   return (
-    <div className="@container overflow-hidden rounded-2xl border border-border bg-hero-gradient shadow-card">
+    <div className="@container rounded-2xl border border-border bg-hero-gradient shadow-card">
       <div className="flex flex-col gap-4 p-5 @min-[900px]:flex-row @min-[900px]:items-center @min-[900px]:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight @min-[900px]:text-[1.75rem]">

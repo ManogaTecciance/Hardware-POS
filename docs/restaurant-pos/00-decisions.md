@@ -11395,6 +11395,102 @@ which is what they are for.
 
 ---
 
+## D177 — two narrow-screen faults, and neither was the button
+
+**Status:** accepted and **built**, 2026-09-16. Presentation and client state
+only; no schema, no API, no migration.
+
+### What was reported
+
+> "1. when screen getting smaller btns wrapping but cant visible them properly
+> 2. also this button not expand the nav"
+
+Two screenshots, two unrelated causes. In both the control the user pressed was
+working correctly.
+
+---
+
+### Fault 1 — the hero clipped its own menu
+
+Below `@min-[1180px]` the hero's secondary actions collapse into a "More
+actions" dropdown — deliberately, so the action row never wraps. On a narrow
+screen that menu is therefore **the only route to Create Quote**.
+
+The hero's root carried `overflow-hidden`, so the dropdown was cut off at the
+card's bottom edge. `z-30` on the menu could not help: `overflow: hidden` clips
+regardless of stacking. The collapse behaviour worked exactly as designed and
+led to something unusable.
+
+**Nothing needed the clip.** The rounded corners clip `bg-hero-gradient` on
+their own — a background always honours `border-radius` — and this card has no
+absolutely-positioned decoration to contain. `MetricCard` does, and has a real
+reason for the class; the hero inherited it from a sibling.
+
+A comment now says so, because the next person adding a decorative overlay will
+reach for `overflow-hidden` on the card and reintroduce this. Clip the overlay
+instead.
+
+---
+
+### Fault 2 — the drawer opened and closed itself in the same tick
+
+Below the `tab:` (900px) cutover the rail is hidden and the off-canvas drawer is
+the **only** way to reach navigation. Pressing the opener appeared to do
+nothing.
+
+`SidebarProvider` built its callbacks inside a `useMemo` keyed on
+`[collapsed, mobileOpen, hydrated]`, so every state change minted a new
+`closeMobile`. `Sidebar` closes the drawer on navigation:
+
+```tsx
+React.useEffect(() => { closeMobile(); }, [pathname, closeMobile]);
+```
+
+So: **open → `mobileOpen` changes → memo rebuilds → new `closeMobile` identity →
+that effect re-runs → drawer shuts.** The button fired, the state flipped, and
+the state flipped back before paint. Indistinguishable from a dead control, and
+below 900px it left the app with no navigation at all.
+
+Collapsing the rail did it too, by the same route — a different trigger for one
+cause, which is why both are pinned separately.
+
+The fix is `useCallback` with no dependencies. Safe because React guarantees the
+`setState` functions are stable and both updaters are functional.
+
+**The general lesson:** a context value that lands in `useEffect` dependency
+arrays is part of the API. An unstable function in it does not merely cost a
+re-render — it can invert the behaviour of every effect that takes one, arbitrarily
+far from where the instability lives. The provider had no bug visible in the
+provider.
+
+---
+
+### On testing both of these
+
+jsdom has **no layout engine and no painting**, so nothing is ever clipped in
+it: a test that measured Fault 1 would pass against the broken card and the
+fixed one alike. The presence of `overflow-hidden` on that element IS the
+defect, so its absence is what is asserted — alongside the classes it was wrongly
+credited with (`rounded-2xl`, `bg-hero-gradient`), so removing it cannot quietly
+remove the card's appearance too.
+
+Fault 2 needs no such compromise and gets none. The test mounts a consumer that
+**reproduces the cycle** — an effect depending on `closeMobile` and calling it,
+written the way the real one is, because that dependency is the bug. It fails
+against the old provider for the original reason rather than because it was told
+what to expect.
+
+Callback identity is then asserted directly with `toBe`, and paired with its
+negative: the state must still actually change. Without that half, a provider
+that had frozen entirely would hand out beautifully stable callbacks and pass.
+
+**Mutation proof** — restoring the callbacks to the memo, verbatim: **3 of 5
+fail**, including "opens the drawer and leaves it open", which is the reported
+symptom. The two survivors pin behaviour that did not change (closing still
+closes; the rail state still toggles), which is what they are for.
+
+---
+
 ## Open decisions
 
 | ID | Question | Needed by |
